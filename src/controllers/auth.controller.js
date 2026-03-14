@@ -4,7 +4,7 @@ const response = require("../utils/response");
 
 const login = async (req, res, next) => {
     try {
-        const { user_nama, user_password } = req.body;
+        const { user_nama, user_password } = req.body ?? {};
         if (!user_nama || !user_password) {
             return response.error(
                 res,
@@ -15,13 +15,7 @@ const login = async (req, res, next) => {
 
         const user = await plan_user.scope("withPassword").findOne({
             where: { user_nama, user_is_active: 1 },
-            include: [
-                {
-                    model: plan_divisi,
-                    as: "user_divisi",
-                    attributes: ["divisi_id", "divisi_kode", "divisi_nama"],
-                },
-            ],
+            include: [plan_divisi],
         });
 
         if (!user)
@@ -61,13 +55,7 @@ const login = async (req, res, next) => {
 const me = async (req, res) => {
     const user = await plan_user.findOne({
         where: { user_id: req.user.user_id },
-        include: [
-            {
-                model: plan_divisi,
-                as: "user_divisi",
-                attributes: ["divisi_id", "divisi_kode", "divisi_nama"],
-            },
-        ],
+        include: [plan_divisi],
     });
     return response.ok(res, user);
 };

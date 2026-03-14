@@ -1,5 +1,5 @@
 const jwt = require("jsonwebtoken");
-const { plan_user, plan_divisi } = require("../models");
+const { plan_user } = require("../models");
 const response = require("../utils/response");
 
 const login = async (req, res, next) => {
@@ -15,13 +15,6 @@ const login = async (req, res, next) => {
 
         const user = await plan_user.scope("withPassword").findOne({
             where: { user_nama, user_is_active: 1 },
-            include: [
-                {
-                    model: plan_divisi,
-                    as: "user_divisi",
-                    attributes: ["divisi_id", "divisi_kode", "divisi_nama"],
-                },
-            ],
         });
 
         if (!user)
@@ -31,7 +24,10 @@ const login = async (req, res, next) => {
                 401,
             );
 
-        const valid = await plan_user.cekPassword(user_password);
+        const valid = await plan_user.cekPassword(
+            user_password,
+            user.user_password,
+        );
         if (!valid)
             return response.error(
                 res,
@@ -61,13 +57,6 @@ const login = async (req, res, next) => {
 const me = async (req, res) => {
     const user = await plan_user.findOne({
         where: { user_id: req.user.user_id },
-        include: [
-            {
-                model: plan_divisi,
-                as: "user_divisi",
-                attributes: ["divisi_id", "divisi_kode", "divisi_nama"],
-            },
-        ],
     });
     return response.ok(res, user);
 };

@@ -27,8 +27,8 @@ module.exports = function (sequelize, DataTypes) {
                 type: DataTypes.STRING(50),
                 allowNull: false,
             },
-            user_divisi_id: {
-                type: DataTypes.INTEGER,
+            user_divisi: {
+                type: DataTypes.STRING(10),
                 allowNull: true,
             },
             user_cabang: {

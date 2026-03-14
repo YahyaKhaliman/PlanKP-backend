@@ -15,7 +15,13 @@ const login = async (req, res, next) => {
 
         const user = await plan_user.scope("withPassword").findOne({
             where: { user_nama, user_is_active: 1 },
-            include: [plan_divisi],
+            include: [
+                {
+                    model: plan_divisi,
+                    as: "user_divisi",
+                    attributes: ["divisi_id", "divisi_kode", "divisi_nama"],
+                },
+            ],
         });
 
         if (!user)
@@ -55,7 +61,13 @@ const login = async (req, res, next) => {
 const me = async (req, res) => {
     const user = await plan_user.findOne({
         where: { user_id: req.user.user_id },
-        include: [plan_divisi],
+        include: [
+            {
+                model: plan_divisi,
+                as: "user_divisi",
+                attributes: ["divisi_id", "divisi_kode", "divisi_nama"],
+            },
+        ],
     });
     return response.ok(res, user);
 };

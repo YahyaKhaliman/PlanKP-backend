@@ -74,6 +74,14 @@ module.exports = function (sequelize, DataTypes) {
                     fields: [{ name: "user_jabatan" }],
                 },
             ],
+            defaultScope: {
+                attributes: { exclude: ["user_password"] },
+            },
+            scopes: {
+                withPassword: {
+                    attributes: { include: ["user_password"] },
+                },
+            },
         },
     );
 

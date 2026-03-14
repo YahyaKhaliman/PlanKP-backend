@@ -4,6 +4,7 @@ const cors = require("cors");
 
 const { sequelize } = require("./models");
 const { errorHandler, notFound } = require("./middleware/errorHandler");
+const logger = require("./middleware/logger");
 
 const authRoutes = require("./routes/auth.route");
 
@@ -12,10 +13,7 @@ const app = express();
 app.use(
     cors({ origin: "*", methods: ["GET", "POST", "PUT", "PATCH", "DELETE"] }),
 );
-app.use((req, res, next) => {
-    console.log(`${req.method} ${req.originalUrl}`);
-    next();
-});
+app.use(logger);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 

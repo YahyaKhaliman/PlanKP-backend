@@ -1,6 +1,30 @@
 const jwt = require("jsonwebtoken");
 const { plan_user } = require("../models");
 const response = require("../utils/response");
+const AuthService = require("../services/auth.service");
+
+const register = async (req, res, next) => {
+    try {
+        const { user_nama, user_password, user_divisi, user_nik } =
+            req.body ?? {};
+        if (!user_nama || !user_password) {
+            return response.error(
+                res,
+                "Nama pengguna dan password wajib diisi",
+                400,
+            );
+        }
+        const user = await AuthService.register({
+            user_nama,
+            user_password,
+            user_divisi,
+            user_nik,
+        });
+        return response.ok(res, user, "Registrasi berhasil");
+    } catch (err) {
+        next(err);
+    }
+};
 
 const login = async (req, res, next) => {
     try {
@@ -13,42 +37,15 @@ const login = async (req, res, next) => {
             );
         }
 
-        const user = await plan_user.scope("withPassword").findOne({
-            where: { user_nama, user_is_active: 1 },
-        });
-
-        if (!user)
-            return response.error(
-                res,
-                "Nama pengguna atau password salah",
-                401,
-            );
-
-        const valid = await plan_user.cekPassword(
+        const result = await AuthService.authenticate({
+            user_nama,
             user_password,
-            user.user_password,
-        );
-        if (!valid)
-            return response.error(
-                res,
-                "Nama pengguna atau password salah",
-                401,
-            );
+        });
+        if (!result.ok) {
+            return response.error(res, result.message, result.status);
+        }
 
-        const token = jwt.sign(
-            {
-                id: user.user_id,
-                jabatan: user.user_jabatan,
-                divisi_id: user.user_divisi_id,
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: process.env.JWT_EXPIRES_IN || "8h" },
-        );
-
-        const userData = user.toJSON();
-        delete userData.user_password;
-
-        return response.ok(res, { token, user: userData }, "Login berhasil");
+        return response.ok(res, result.data, "Login berhasil");
     } catch (err) {
         next(err);
     }
@@ -90,4 +87,4 @@ const changePassword = async (req, res, next) => {
     }
 };
 
-module.exports = { login, me, changePassword };
+module.exports = { login, me, changePassword, register };

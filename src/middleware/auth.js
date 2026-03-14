@@ -1,6 +1,6 @@
 const jwt = require("jsonwebtoken");
-const { plan_user } = require("../models");
 const response = require("../utils/response");
+const UserService = require("../services/user.service");
 
 const verifyToken = async (req, res, next) => {
     try {
@@ -10,10 +10,7 @@ const verifyToken = async (req, res, next) => {
         }
         const token = authHeader.split(" ")[1];
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await plan_user.scope("withPassword").findOne({
-            where: { user_id: decoded.id, user_is_active: 1 },
-            attributes: { exclude: ["user_password"] },
-        });
+        const user = await UserService.findActiveById(decoded.id);
         if (!user)
             return response.error(
                 res,

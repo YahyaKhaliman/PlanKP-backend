@@ -5,7 +5,6 @@ const cors = require("cors");
 const { sequelize } = require("./models");
 const { errorHandler, notFound } = require("./middleware/errorHandler");
 const logger = require("./middleware/logger");
-
 const authRoutes = require("./routes/auth.route");
 
 const app = express();

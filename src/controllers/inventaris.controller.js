@@ -1,4 +1,4 @@
-const { Inventaris, User } = require("../models");
+const { plan_inventaris: Inventaris, plan_user: User } = require("../models");
 const { Op } = require("sequelize");
 const response = require("../utils/response");
 
@@ -17,7 +17,7 @@ const getAll = async (req, res, next) => {
             include: [
                 {
                     model: User,
-                    as: "created_by_user",
+                    as: "inv_created_by_plan_user",
                     attributes: ["user_id", "user_nama"],
                 },
             ],
@@ -36,7 +36,7 @@ const getOne = async (req, res, next) => {
             include: [
                 {
                     model: User,
-                    as: "created_by_user",
+                    as: "inv_created_by_plan_user",
                     attributes: ["user_id", "user_nama"],
                 },
             ],
@@ -60,6 +60,7 @@ const create = async (req, res, next) => {
             inv_lokasi,
             inv_merk,
             inv_serial_number,
+            inv_pic,
             inv_tgl_beli,
             inv_kondisi,
             inv_notes,
@@ -85,6 +86,7 @@ const create = async (req, res, next) => {
             inv_lokasi,
             inv_merk,
             inv_serial_number,
+            inv_pic,
             inv_tgl_beli,
             inv_kondisi,
             inv_notes,
@@ -111,6 +113,7 @@ const update = async (req, res, next) => {
             "inv_lokasi",
             "inv_merk",
             "inv_serial_number",
+            "inv_pic",
             "inv_tgl_beli",
             "inv_kondisi",
             "inv_notes",

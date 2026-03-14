@@ -5,7 +5,7 @@ const AuthService = require("../services/auth.service");
 
 const register = async (req, res, next) => {
     try {
-        const { user_nama, user_password, user_divisi, user_nik } =
+        const { user_nama, user_password, user_divisi, user_nik, user_cabang } =
             req.body ?? {};
         if (!user_nama || !user_password) {
             return response.error(
@@ -19,6 +19,7 @@ const register = async (req, res, next) => {
             user_password,
             user_divisi,
             user_nik,
+            user_cabang,
         });
         return response.ok(res, user, "Registrasi berhasil");
     } catch (err) {
@@ -75,10 +76,10 @@ const changePassword = async (req, res, next) => {
         const user = await plan_user
             .scope("withPassword")
             .findByPk(req.user.user_id);
-        const valid = await user.cekPassword(password_lama);
-        if (!valid) return response.error(res, "Password lama salah", 400);
+        if (user.user_password !== password_lama)
+            return response.error(res, "Password lama salah", 400);
 
-        user.user_password = await plan_user.hashPassword(password_baru);
+        user.user_password = password_baru;
         await user.save();
 
         return response.ok(res, null, "Password berhasil diubah");

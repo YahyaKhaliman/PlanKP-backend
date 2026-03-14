@@ -1,22 +1,10 @@
 const jwt = require("jsonwebtoken");
-const { plan_user } = require("../models");
 const UserService = require("./user.service");
 
 class AuthService {
     static async authenticate({ user_nama, user_password }) {
         const user = await UserService.findActiveByName(user_nama);
-        if (!user)
-            return {
-                ok: false,
-                status: 401,
-                message: "Nama pengguna atau password salah",
-            };
-
-        const valid = await plan_user.cekPassword(
-            user_password,
-            user.user_password,
-        );
-        if (!valid)
+        if (!user || user.user_password !== user_password)
             return {
                 ok: false,
                 status: 401,
@@ -42,7 +30,13 @@ class AuthService {
         };
     }
 
-    static async register({ user_nama, user_password, user_divisi, user_nik }) {
+    static async register({
+        user_nama,
+        user_password,
+        user_divisi,
+        user_nik,
+        user_cabang,
+    }) {
         const existed = await UserService.findActiveByName(user_nama);
         if (existed) {
             throw new Error("Username sudah digunakan");
@@ -50,13 +44,13 @@ class AuthService {
 
         const nik = (user_nik || user_nama).trim();
 
-        const hashed = await plan_user.hashPassword(user_password);
         const created = await UserService.createUser({
             user_nama,
             user_nik: nik,
-            user_password: hashed,
+            user_password,
             user_divisi,
             user_jabatan: "user",
+            user_cabang,
             user_is_active: 1,
         });
         const plain = created.toJSON();

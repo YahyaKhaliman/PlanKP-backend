@@ -1,5 +1,4 @@
 const Sequelize = require("sequelize");
-const bcrypt = require("bcryptjs");
 module.exports = function (sequelize, DataTypes) {
     const PlanUser = sequelize.define(
         "plan_user",
@@ -84,16 +83,6 @@ module.exports = function (sequelize, DataTypes) {
             },
         },
     );
-
-    PlanUser.cekPassword = async function (plain, hashed) {
-        if (!hashed) return false;
-        return bcrypt.compare(plain, hashed);
-    };
-
-    PlanUser.hashPassword = async function (plain) {
-        const salt = await bcrypt.genSalt(10);
-        return bcrypt.hash(plain, salt);
-    };
 
     return PlanUser;
 };

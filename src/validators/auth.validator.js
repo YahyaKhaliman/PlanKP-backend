@@ -13,12 +13,15 @@ const registerSchema = (req) => {
     const baseValidation = loginSchema(req);
     if (baseValidation.error) return baseValidation;
 
-    const { user_divisi, user_nik } = req.body || {};
+    const { user_divisi, user_nik, user_cabang } = req.body || {};
     if (!user_divisi) {
         return { error: "user_divisi wajib diisi" };
     }
-    if (user_nik && String(user_nik).length < 4) {
-        return { error: "user_nik minimal 4 karakter" };
+    if (!user_nik) {
+        return { error: "user_nik wajib diisi" };
+    }
+    if (!user_cabang) {
+        return { error: "user_cabang wajib diisi" };
     }
     return { error: null };
 };

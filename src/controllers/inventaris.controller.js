@@ -19,6 +19,8 @@ const getAll = async (req, res, next) => {
                     model: User,
                     as: "inv_created_by_plan_user",
                     attributes: ["user_id", "user_nama"],
+                    where: { user_is_active: 1 },
+                    required: true,
                 },
             ],
             order: [["inv_nama", "ASC"]],

@@ -6,8 +6,9 @@ const { sequelize } = require("./models");
 const { errorHandler, notFound } = require("./middleware/errorHandler");
 const logger = require("./middleware/logger");
 const authRoutes = require("./routes/auth.route");
-const masterChecklistRoutes = require("./routes/checklistTemplate.route");
-const masterInventarisRoutes = require("./routes/inventaris.route");
+const checklistRoutes = require("./routes/checklistTemplate.route");
+const inventarisRoutes = require("./routes/inventaris.route");
+const userRoutes = require("./routes/user.route");
 
 const app = express();
 
@@ -23,8 +24,9 @@ app.get("/api/health", (req, res) =>
 );
 
 app.use("/api/auth", authRoutes);
-app.use("/api/master", masterChecklistRoutes);
-app.use("/api/master", masterInventarisRoutes);
+app.use("/api/master", checklistRoutes);
+app.use("/api/master", inventarisRoutes);
+app.use("/api/master", userRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

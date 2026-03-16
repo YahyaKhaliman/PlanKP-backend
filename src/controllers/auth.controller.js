@@ -7,10 +7,10 @@ const register = async (req, res, next) => {
     try {
         const { user_nama, user_password, user_divisi, user_nik, user_cabang } =
             req.body ?? {};
-        if (!user_nama || !user_password) {
+        if (!user_nama || !user_password || !user_divisi) {
             return response.error(
                 res,
-                "Nama pengguna dan password wajib diisi",
+                "Nama, divisi, dan password wajib diisi",
                 400,
             );
         }

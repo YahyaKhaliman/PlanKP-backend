@@ -19,7 +19,7 @@ module.exports = function (sequelize, DataTypes) {
                 unique: "uq_user_nik",
             },
             user_password: {
-                type: DataTypes.STRING(255),
+                type: DataTypes.STRING(10),
                 allowNull: false,
             },
             user_jabatan: {
@@ -27,8 +27,14 @@ module.exports = function (sequelize, DataTypes) {
                 allowNull: false,
             },
             user_divisi: {
-                type: DataTypes.STRING(10),
-                allowNull: true,
+                type: DataTypes.ENUM(
+                    "Teknisi Jahit",
+                    "Teknisi Umum",
+                    "IT Support",
+                    "Satpam",
+                    "Kebersihan",
+                ),
+                allowNull: false,
             },
             user_cabang: {
                 type: DataTypes.STRING(3),
@@ -47,7 +53,9 @@ module.exports = function (sequelize, DataTypes) {
             user_updated_at: {
                 type: DataTypes.DATE,
                 allowNull: false,
-                defaultValue: Sequelize.Sequelize.literal("CURRENT_TIMESTAMP"),
+                defaultValue: Sequelize.Sequelize.literal(
+                    "CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+                ),
             },
         },
         {

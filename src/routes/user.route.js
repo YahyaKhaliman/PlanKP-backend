@@ -4,6 +4,7 @@ const user = require("../controllers/user.controller");
 
 router.use(verifyToken, allowOnly("admin"));
 
+router.get("/users/mapping-kategori", user.getMappingKategori);
 router.get("/users", user.getAll);
 router.post("/users", user.create);
 router.put("/users/:id", user.update);

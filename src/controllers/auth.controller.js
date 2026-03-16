@@ -69,8 +69,8 @@ const changePassword = async (req, res, next) => {
                 400,
             );
         }
-        if (password_baru.length < 6) {
-            return response.error(res, "Password baru minimal 6 karakter", 400);
+        if (password_baru.length < 2) {
+            return response.error(res, "Password baru minimal 2 karakter", 400);
         }
 
         const user = await plan_user

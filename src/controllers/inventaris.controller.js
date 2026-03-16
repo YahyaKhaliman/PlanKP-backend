@@ -1,4 +1,8 @@
-const { plan_inventaris: Inventaris, plan_user: User } = require("../models");
+const {
+    plan_inventaris: Inventaris,
+    plan_user: User,
+    sequelize,
+} = require("../models");
 const { Op } = require("sequelize");
 const response = require("../utils/response");
 
@@ -26,6 +30,26 @@ const getAll = async (req, res, next) => {
             order: [["inv_nama", "ASC"]],
         });
         return response.ok(res, data);
+    } catch (err) {
+        next(err);
+    }
+};
+
+// GET /inventaris/jenis
+const getJenis = async (req, res, next) => {
+    try {
+        const rows = await Inventaris.findAll({
+            attributes: [
+                [
+                    sequelize.fn("DISTINCT", sequelize.col("inv_jenis")),
+                    "inv_jenis",
+                ],
+            ],
+            where: { inv_is_active: 1 },
+            order: [["inv_jenis", "ASC"]],
+        });
+        const list = rows.map((row) => row.inv_jenis);
+        return response.ok(res, list);
     } catch (err) {
         next(err);
     }
@@ -149,4 +173,4 @@ const toggleAktif = async (req, res, next) => {
     }
 };
 
-module.exports = { getAll, getOne, create, update, toggleAktif };
+module.exports = { getAll, getOne, create, update, toggleAktif, getJenis };

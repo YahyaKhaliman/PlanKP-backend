@@ -39,12 +39,12 @@ const getAll = async (req, res, next) => {
             include: [
                 {
                     model: User,
-                    as: "assigned_user",
+                    as: "jdw_assigned_to_plan_user",
                     attributes: ["user_id", "user_nama", "user_jabatan"],
                 },
                 {
                     model: User,
-                    as: "dibuat_user",
+                    as: "jdw_dibuat_oleh_plan_user",
                     attributes: ["user_id", "user_nama"],
                 },
             ],
@@ -63,12 +63,12 @@ const getOne = async (req, res, next) => {
             include: [
                 {
                     model: User,
-                    as: "assigned_user",
+                    as: "jdw_assigned_to_plan_user",
                     attributes: ["user_id", "user_nama", "user_jabatan"],
                 },
                 {
                     model: User,
-                    as: "dibuat_user",
+                    as: "jdw_dibuat_oleh_plan_user",
                     attributes: ["user_id", "user_nama"],
                 },
             ],

@@ -36,6 +36,7 @@ class AuthService {
         user_divisi,
         user_nik,
         user_cabang,
+        user_jabatan,
     }) {
         const existed = await UserService.findActiveByName(user_nama);
         if (existed) {
@@ -49,7 +50,7 @@ class AuthService {
             user_nik: nik,
             user_password,
             user_divisi,
-            user_jabatan: "user",
+            user_jabatan: user_jabatan || "user",
             user_cabang,
             user_is_active: 1,
         });

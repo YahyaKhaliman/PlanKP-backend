@@ -3,6 +3,7 @@ const {
     plan_user: User,
     plan_inventaris: Inventaris,
 } = require("../models");
+const UserService = require("../services/user.service");
 const { Op } = require("sequelize");
 const response = require("../utils/response");
 
@@ -17,13 +18,15 @@ const getWeekNumber = (dateStr) => {
 // GET /jadwal?status=Aktif&jenis=Sewing&assigned_to=1&tgl=2025-03-01
 const getAll = async (req, res, next) => {
     try {
-        const { status, jenis, assigned_to, tgl, bulan, tahun } = req.query;
+        const { status, jenis, assigned_to, tgl, bulan, tahun, divisi } =
+            req.query;
         const where = {};
         if (status) where.jdw_status = status;
         if (jenis) where.jdw_inv_jenis = jenis;
         if (assigned_to) where.jdw_assigned_to = assigned_to;
         if (bulan) where.jdw_bulan = bulan;
         if (tahun) where.jdw_tahun = tahun;
+        if (divisi) where.jdw_divisi = divisi;
 
         // filter jadwal yang aktif pada tanggal tertentu
         if (tgl) {
@@ -34,13 +37,26 @@ const getAll = async (req, res, next) => {
             ];
         }
 
+        const isAdmin = req.user.user_jabatan === "admin";
+        if (!isAdmin) {
+            where[Op.or] = [
+                { jdw_divisi: req.user.user_divisi },
+                { jdw_assigned_to: req.user.user_id },
+            ];
+        }
+
         const data = await Jadwal.findAll({
             where,
             include: [
                 {
                     model: User,
                     as: "jdw_assigned_to_plan_user",
-                    attributes: ["user_id", "user_nama", "user_jabatan"],
+                    attributes: [
+                        "user_id",
+                        "user_nama",
+                        "user_jabatan",
+                        "user_divisi",
+                    ],
                 },
                 {
                     model: User,
@@ -64,7 +80,12 @@ const getOne = async (req, res, next) => {
                 {
                     model: User,
                     as: "jdw_assigned_to_plan_user",
-                    attributes: ["user_id", "user_nama", "user_jabatan"],
+                    attributes: [
+                        "user_id",
+                        "user_nama",
+                        "user_jabatan",
+                        "user_divisi",
+                    ],
                 },
                 {
                     model: User,
@@ -74,6 +95,15 @@ const getOne = async (req, res, next) => {
             ],
         });
         if (!data) return response.error(res, "Jadwal tidak ditemukan", 404);
+
+        const isAdmin = req.user.user_jabatan === "admin";
+        if (
+            !isAdmin &&
+            data.jdw_divisi !== req.user.user_divisi &&
+            data.jdw_assigned_to !== req.user.user_id
+        ) {
+            return response.error(res, "Akses jadwal ditolak", 403);
+        }
 
         // ambil inventaris dengan jenis yang sama
         const inventarisList = await Inventaris.findAll({
@@ -101,6 +131,7 @@ const create = async (req, res, next) => {
         const {
             jdw_judul,
             jdw_inv_jenis,
+            jdw_divisi,
             jdw_frekuensi,
             jdw_tgl_mulai,
             jdw_tgl_selesai,
@@ -108,10 +139,16 @@ const create = async (req, res, next) => {
             jdw_notes,
         } = req.body;
 
-        if (!jdw_judul || !jdw_inv_jenis || !jdw_frekuensi || !jdw_tgl_mulai)
+        if (
+            !jdw_judul ||
+            !jdw_inv_jenis ||
+            !jdw_divisi ||
+            !jdw_frekuensi ||
+            !jdw_tgl_mulai
+        )
             return response.error(
                 res,
-                "Judul, jenis inventaris, frekuensi, dan tanggal mulai wajib diisi",
+                "Judul, jenis inventaris, divisi, frekuensi, dan tanggal mulai wajib diisi",
                 400,
             );
 
@@ -123,6 +160,7 @@ const create = async (req, res, next) => {
         const data = await Jadwal.create({
             jdw_judul,
             jdw_inv_jenis,
+            jdw_divisi,
             jdw_frekuensi,
             jdw_tgl_mulai,
             jdw_tgl_selesai: jdw_tgl_selesai || null,
@@ -157,6 +195,7 @@ const update = async (req, res, next) => {
             "jdw_judul",
             "jdw_inv_jenis",
             "jdw_frekuensi",
+            "jdw_divisi",
             "jdw_tgl_mulai",
             "jdw_tgl_selesai",
             "jdw_assigned_to",
@@ -210,12 +249,11 @@ const hariIni = async (req, res, next) => {
                 { jdw_tgl_selesai: null },
                 { jdw_tgl_selesai: { [Op.gte]: today } },
             ],
+            jdw_divisi: req.user.user_divisi,
         };
 
-        // teknisi & it_support hanya lihat jadwal yang di-assign ke mereka
-        if (["teknisi", "it_support"].includes(req.user.user_jabatan)) {
-            where.jdw_assigned_to = req.user.user_id;
-        }
+        const isAdmin = req.user.user_jabatan === "admin";
+        if (isAdmin) delete where.jdw_divisi;
 
         const data = await Jadwal.findAll({
             where,

@@ -19,7 +19,12 @@ module.exports = function (sequelize, DataTypes) {
                 allowNull: false,
             },
             inv_kategori: {
-                type: DataTypes.ENUM("Mesin", "Hardware", "APAR", "Lainnya"),
+                type: DataTypes.ENUM(
+                    "Mesin Jahit",
+                    "Mesin Umum",
+                    "Hardware",
+                    "APAR",
+                ),
                 allowNull: false,
             },
             inv_jenis: {
@@ -39,8 +44,12 @@ module.exports = function (sequelize, DataTypes) {
                 allowNull: true,
             },
             inv_pic: {
-                type: DataTypes.STRING(100),
+                type: DataTypes.INTEGER,
                 allowNull: true,
+                references: {
+                    model: "plan_user",
+                    key: "user_id",
+                },
             },
             inv_tgl_beli: {
                 type: DataTypes.DATEONLY,
@@ -59,14 +68,6 @@ module.exports = function (sequelize, DataTypes) {
             inv_notes: {
                 type: DataTypes.TEXT,
                 allowNull: true,
-            },
-            inv_created_by: {
-                type: DataTypes.INTEGER,
-                allowNull: false,
-                references: {
-                    model: "plan_user",
-                    key: "user_id",
-                },
             },
             inv_created_at: {
                 type: DataTypes.DATE,
@@ -110,11 +111,6 @@ module.exports = function (sequelize, DataTypes) {
                     name: "idx_inv_active",
                     using: "BTREE",
                     fields: [{ name: "inv_is_active" }],
-                },
-                {
-                    name: "fk_inv_created_by",
-                    using: "BTREE",
-                    fields: [{ name: "inv_created_by" }],
                 },
             ],
         },

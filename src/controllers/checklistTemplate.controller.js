@@ -7,7 +7,7 @@ const response = require("../utils/response");
 // GET /checklist-template?jenis=Sewing
 const getAll = async (req, res, next) => {
     try {
-        const where = { ct_is_active: 1 };
+        const where = { ct_is_active: true };
         if (req.query.jenis) where.ct_inv_jenis = req.query.jenis;
         const data = await ChecklistTemplate.findAll({
             where,
@@ -65,7 +65,7 @@ const bulkCreate = async (req, res, next) => {
 
         // Ambil urutan terakhir untuk jenis ini
         const lastItem = await ChecklistTemplate.findOne({
-            where: { ct_inv_jenis, ct_is_active: 1 },
+            where: { ct_inv_jenis, ct_is_active: true },
             order: [["ct_urutan", "DESC"]],
             transaction: t,
         });
@@ -78,7 +78,7 @@ const bulkCreate = async (req, res, next) => {
                 ct_item: i.ct_item.trim(),
                 ct_keterangan: i.ct_keterangan?.trim() || null,
                 ct_urutan: nextUrutan++,
-                ct_is_active: 1,
+                ct_is_active: true,
                 ct_created_by: req.user.user_id,
             }));
 
@@ -98,31 +98,6 @@ const bulkCreate = async (req, res, next) => {
             data,
             `${data.length} item berhasil ditambahkan ke checklist ${ct_inv_jenis}`,
         );
-    } catch (err) {
-        await t.rollback();
-        next(err);
-    }
-};
-
-// PATCH /checklist-template/reorder
-// body: { orders: [{ ct_id, ct_urutan }] }
-const reorder = async (req, res, next) => {
-    const t = await sequelize.transaction();
-    try {
-        const { orders } = req.body;
-        if (!Array.isArray(orders) || orders.length === 0)
-            return response.error(res, "Data urutan wajib diisi", 400);
-
-        await Promise.all(
-            orders.map(({ ct_id, ct_urutan }) =>
-                ChecklistTemplate.update(
-                    { ct_urutan },
-                    { where: { ct_id }, transaction: t },
-                ),
-            ),
-        );
-        await t.commit();
-        return response.ok(res, null, "Urutan berhasil diperbarui");
     } catch (err) {
         await t.rollback();
         next(err);
@@ -151,7 +126,7 @@ const remove = async (req, res, next) => {
     try {
         const data = await ChecklistTemplate.findByPk(req.params.id);
         if (!data) return response.error(res, "Item tidak ditemukan", 404);
-        data.ct_is_active = 0;
+        data.ct_is_active = false;
         await data.save();
         return response.ok(res, null, "Item checklist dihapus");
     } catch (err) {
@@ -169,7 +144,7 @@ const getJenis = async (req, res, next) => {
                     "ct_inv_jenis",
                 ],
             ],
-            where: { ct_is_active: 1 },
+            where: { ct_is_active: true },
             order: [["ct_inv_jenis", "ASC"]],
         });
         const list = rows.map((row) => row.ct_inv_jenis);
@@ -183,7 +158,6 @@ module.exports = {
     getAll,
     create,
     bulkCreate,
-    reorder,
     update,
     remove,
     getJenis,

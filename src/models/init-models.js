@@ -49,22 +49,6 @@ function initModels(sequelize) {
         as: "plan_hasil_checklists",
         foreignKey: "hc_real_id",
     });
-    plan_checklist_template.belongsTo(plan_user, {
-        as: "ct_created_by_plan_user",
-        foreignKey: "ct_created_by",
-    });
-    plan_user.hasMany(plan_checklist_template, {
-        as: "plan_checklist_templates",
-        foreignKey: "ct_created_by",
-    });
-    plan_inventaris.belongsTo(plan_user, {
-        as: "inv_created_by_plan_user",
-        foreignKey: "inv_created_by",
-    });
-    plan_user.hasMany(plan_inventaris, {
-        as: "plan_inventaris",
-        foreignKey: "inv_created_by",
-    });
     plan_jadwal.belongsTo(plan_user, {
         as: "jdw_assigned_to_plan_user",
         foreignKey: "jdw_assigned_to",

@@ -18,15 +18,6 @@ const getAll = async (req, res, next) => {
 
         const data = await Inventaris.findAll({
             where,
-            include: [
-                {
-                    model: User,
-                    as: "inv_created_by_plan_user",
-                    attributes: ["user_id", "user_nama"],
-                    where: { user_is_active: 1 },
-                    required: true,
-                },
-            ],
             order: [["inv_nama", "ASC"]],
         });
         return response.ok(res, data);
@@ -58,15 +49,7 @@ const getJenis = async (req, res, next) => {
 // GET /inventaris/:id
 const getOne = async (req, res, next) => {
     try {
-        const data = await Inventaris.findByPk(req.params.id, {
-            include: [
-                {
-                    model: User,
-                    as: "inv_created_by_plan_user",
-                    attributes: ["user_id", "user_nama"],
-                },
-            ],
-        });
+        const data = await Inventaris.findByPk(req.params.id);
         if (!data)
             return response.error(res, "Inventaris tidak ditemukan", 404);
         return response.ok(res, data);
@@ -116,7 +99,6 @@ const create = async (req, res, next) => {
             inv_tgl_beli,
             inv_kondisi,
             inv_notes,
-            inv_created_by: req.user.user_id,
         });
         return response.created(res, data, "Inventaris berhasil ditambahkan");
     } catch (err) {

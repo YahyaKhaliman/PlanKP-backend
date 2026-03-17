@@ -5,8 +5,14 @@ const AuthService = require("../services/auth.service");
 
 const register = async (req, res, next) => {
     try {
-        const { user_nama, user_password, user_divisi, user_nik, user_cabang } =
-            req.body ?? {};
+        const {
+            user_nama,
+            user_password,
+            user_divisi,
+            user_nik,
+            user_cabang,
+            user_jabatan,
+        } = req.body ?? {};
         if (!user_nama || !user_password || !user_divisi) {
             return response.error(
                 res,
@@ -20,6 +26,7 @@ const register = async (req, res, next) => {
             user_divisi,
             user_nik,
             user_cabang,
+            user_jabatan,
         });
         return response.ok(res, user, "Registrasi berhasil");
     } catch (err) {

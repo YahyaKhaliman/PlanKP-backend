@@ -9,9 +9,13 @@ module.exports = function (sequelize, DataTypes) {
                 allowNull: false,
                 primaryKey: true,
             },
-            ct_inv_jenis: {
-                type: DataTypes.STRING(100),
+            ct_jenis_id: {
+                type: DataTypes.INTEGER,
                 allowNull: false,
+                references: {
+                    model: "plan_jenis",
+                    key: "jenis_id",
+                },
             },
             ct_item: {
                 type: DataTypes.STRING(200),
@@ -59,12 +63,12 @@ module.exports = function (sequelize, DataTypes) {
                 {
                     name: "idx_ct_jenis",
                     using: "BTREE",
-                    fields: [{ name: "ct_inv_jenis" }],
+                    fields: [{ name: "ct_jenis_id" }],
                 },
                 {
                     name: "idx_ct_urutan",
                     using: "BTREE",
-                    fields: [{ name: "ct_inv_jenis" }, { name: "ct_urutan" }],
+                    fields: [{ name: "ct_jenis_id" }, { name: "ct_urutan" }],
                 },
             ],
         },

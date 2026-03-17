@@ -19,7 +19,7 @@ module.exports = function (sequelize, DataTypes) {
                 unique: "uq_user_nik",
             },
             user_password: {
-                type: DataTypes.STRING(10),
+                type: DataTypes.STRING(255),
                 allowNull: false,
             },
             user_jabatan: {
@@ -78,6 +78,11 @@ module.exports = function (sequelize, DataTypes) {
                     name: "idx_user_jabatan",
                     using: "BTREE",
                     fields: [{ name: "user_jabatan" }],
+                },
+                {
+                    name: "idx_user_divisi",
+                    using: "BTREE",
+                    fields: [{ name: "user_divisi" }],
                 },
             ],
             defaultScope: {

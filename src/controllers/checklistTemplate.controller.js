@@ -8,11 +8,11 @@ const response = require("../utils/response");
 const getAll = async (req, res, next) => {
     try {
         const where = { ct_is_active: true };
-        if (req.query.jenis) where.ct_inv_jenis = req.query.jenis;
+        if (req.query.jenis) where.ct_jenis_id = req.query.jenis;
         const data = await ChecklistTemplate.findAll({
             where,
             order: [
-                ["ct_inv_jenis", "ASC"],
+                ["ct_jenis_id", "ASC"],
                 ["ct_urutan", "ASC"],
             ],
         });
@@ -25,8 +25,8 @@ const getAll = async (req, res, next) => {
 // POST /checklist-template
 const create = async (req, res, next) => {
     try {
-        const { ct_inv_jenis, ct_item, ct_keterangan, ct_urutan } = req.body;
-        if (!ct_inv_jenis || !ct_item)
+        const { ct_jenis_id, ct_item, ct_keterangan, ct_urutan } = req.body;
+        if (!ct_jenis_id || !ct_item)
             return response.error(
                 res,
                 "Jenis inventaris dan item wajib diisi",
@@ -34,7 +34,7 @@ const create = async (req, res, next) => {
             );
 
         const data = await ChecklistTemplate.create({
-            ct_inv_jenis,
+            ct_jenis_id,
             ct_item,
             ct_keterangan,
             ct_urutan: ct_urutan ?? 1,
@@ -51,12 +51,12 @@ const create = async (req, res, next) => {
 };
 
 // POST /checklist-template/bulk
-// body: { ct_inv_jenis: "Sewing", items: [{ ct_item, ct_keterangan }] }
+// body: { ct_jenis_id: 1, items: [{ ct_item, ct_keterangan }] }
 const bulkCreate = async (req, res, next) => {
     const t = await sequelize.transaction();
     try {
-        const { ct_inv_jenis, items } = req.body;
-        if (!ct_inv_jenis || !Array.isArray(items) || items.length === 0)
+        const { ct_jenis_id, items } = req.body;
+        if (!ct_jenis_id || !Array.isArray(items) || items.length === 0)
             return response.error(
                 res,
                 "Jenis dan daftar item wajib diisi",
@@ -65,7 +65,7 @@ const bulkCreate = async (req, res, next) => {
 
         // Ambil urutan terakhir untuk jenis ini
         const lastItem = await ChecklistTemplate.findOne({
-            where: { ct_inv_jenis, ct_is_active: true },
+            where: { ct_jenis_id, ct_is_active: true },
             order: [["ct_urutan", "DESC"]],
             transaction: t,
         });
@@ -74,7 +74,7 @@ const bulkCreate = async (req, res, next) => {
         const toInsert = items
             .filter((i) => i.ct_item?.trim())
             .map((i) => ({
-                ct_inv_jenis,
+                ct_jenis_id,
                 ct_item: i.ct_item.trim(),
                 ct_keterangan: i.ct_keterangan?.trim() || null,
                 ct_urutan: nextUrutan++,
@@ -96,7 +96,7 @@ const bulkCreate = async (req, res, next) => {
         return response.created(
             res,
             data,
-            `${data.length} item berhasil ditambahkan ke checklist ${ct_inv_jenis}`,
+            `${data.length} item berhasil ditambahkan ke checklist ${ct_jenis_id}`,
         );
     } catch (err) {
         await t.rollback();
@@ -109,7 +109,7 @@ const update = async (req, res, next) => {
     try {
         const data = await ChecklistTemplate.findByPk(req.params.id);
         if (!data) return response.error(res, "Item tidak ditemukan", 404);
-        ["ct_inv_jenis", "ct_item", "ct_keterangan", "ct_urutan"].forEach(
+        ["ct_jenis_id", "ct_item", "ct_keterangan", "ct_urutan"].forEach(
             (f) => {
                 if (req.body[f] !== undefined) data[f] = req.body[f];
             },
@@ -140,14 +140,14 @@ const getJenis = async (req, res, next) => {
         const rows = await ChecklistTemplate.findAll({
             attributes: [
                 [
-                    sequelize.fn("DISTINCT", sequelize.col("ct_inv_jenis")),
-                    "ct_inv_jenis",
+                    sequelize.fn("DISTINCT", sequelize.col("ct_jenis_id")),
+                    "ct_jenis_id",
                 ],
             ],
             where: { ct_is_active: true },
-            order: [["ct_inv_jenis", "ASC"]],
+            order: [["ct_jenis_id", "ASC"]],
         });
-        const list = rows.map((row) => row.ct_inv_jenis);
+        const list = rows.map((row) => row.ct_jenis_id);
         return response.ok(res, list);
     } catch (err) {
         next(err);

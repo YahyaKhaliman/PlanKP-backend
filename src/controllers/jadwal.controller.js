@@ -30,19 +30,25 @@ const getAll = async (req, res, next) => {
 
         // filter jadwal yang aktif pada tanggal tertentu
         if (tgl) {
-            where.jdw_tgl_mulai = { [Op.lte]: tgl };
-            where[Op.or] = [
-                { jdw_tgl_selesai: null },
-                { jdw_tgl_selesai: { [Op.gte]: tgl } },
-            ];
+            where[Op.and] = where[Op.and] || [];
+            where[Op.and].push({ jdw_tgl_mulai: { [Op.lte]: tgl } });
+            where[Op.and].push({
+                [Op.or]: [
+                    { jdw_tgl_selesai: null },
+                    { jdw_tgl_selesai: { [Op.gte]: tgl } },
+                ],
+            });
         }
 
         const isAdmin = req.user.user_jabatan === "admin";
         if (!isAdmin) {
-            where[Op.or] = [
-                { jdw_divisi: req.user.user_divisi },
-                { jdw_assigned_to: req.user.user_id },
-            ];
+            where[Op.and] = where[Op.and] || [];
+            where[Op.and].push({
+                [Op.or]: [
+                    { jdw_divisi: req.user.user_divisi },
+                    { jdw_assigned_to: req.user.user_id },
+                ],
+            });
         }
 
         const data = await Jadwal.findAll({
@@ -58,6 +64,40 @@ const getAll = async (req, res, next) => {
                         "user_divisi",
                     ],
                 },
+                {
+                    model: User,
+                    as: "jdw_dibuat_oleh_plan_user",
+                    attributes: ["user_id", "user_nama"],
+                },
+            ],
+            order: [["jdw_tgl_mulai", "DESC"]],
+        });
+        return response.ok(res, data);
+    } catch (err) {
+        next(err);
+    }
+};
+
+const getByDivisi = async (req, res, next) => {
+    try {
+        const { status, jenis, tgl } = req.query;
+        const where = { jdw_divisi: req.user.user_divisi };
+        if (status) where.jdw_status = status;
+        if (jenis) where.jdw_inv_jenis = jenis;
+        if (tgl) {
+            where[Op.and] = where[Op.and] || [];
+            where[Op.and].push({ jdw_tgl_mulai: { [Op.lte]: tgl } });
+            where[Op.and].push({
+                [Op.or]: [
+                    { jdw_tgl_selesai: null },
+                    { jdw_tgl_selesai: { [Op.gte]: tgl } },
+                ],
+            });
+        }
+
+        const data = await Jadwal.findAll({
+            where,
+            include: [
                 {
                     model: User,
                     as: "jdw_dibuat_oleh_plan_user",
@@ -112,9 +152,17 @@ const getOne = async (req, res, next) => {
                 "inv_id",
                 "inv_no",
                 "inv_nama",
+                "inv_jenis",
                 "inv_lokasi",
                 "inv_pic",
                 "inv_kondisi",
+            ],
+            include: [
+                {
+                    model: User,
+                    as: "pic_user",
+                    attributes: ["user_id", "user_nama", "user_jabatan"],
+                },
             ],
             order: [["inv_nama", "ASC"]],
         });
@@ -130,6 +178,7 @@ const create = async (req, res, next) => {
     try {
         const {
             jdw_judul,
+            jdw_jenis_id,
             jdw_inv_jenis,
             jdw_divisi,
             jdw_frekuensi,
@@ -141,6 +190,7 @@ const create = async (req, res, next) => {
 
         if (
             !jdw_judul ||
+            !jdw_jenis_id ||
             !jdw_inv_jenis ||
             !jdw_divisi ||
             !jdw_frekuensi ||
@@ -159,6 +209,7 @@ const create = async (req, res, next) => {
 
         const data = await Jadwal.create({
             jdw_judul,
+            jdw_jenis_id,
             jdw_inv_jenis,
             jdw_divisi,
             jdw_frekuensi,
@@ -193,6 +244,7 @@ const update = async (req, res, next) => {
 
         const fields = [
             "jdw_judul",
+            "jdw_jenis_id",
             "jdw_inv_jenis",
             "jdw_frekuensi",
             "jdw_divisi",
@@ -272,4 +324,12 @@ const hariIni = async (req, res, next) => {
     }
 };
 
-module.exports = { getAll, getOne, create, update, updateStatus, hariIni };
+module.exports = {
+    getAll,
+    getByDivisi,
+    getOne,
+    create,
+    update,
+    updateStatus,
+    hariIni,
+};

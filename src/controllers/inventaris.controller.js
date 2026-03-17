@@ -12,7 +12,7 @@ const getAll = async (req, res, next) => {
         const { kategori, jenis, q, aktif } = req.query;
         const where = {};
         if (kategori) where.inv_kategori = kategori;
-        if (jenis) where.inv_jenis = jenis;
+        if (jenis) where.inv_jenis_id = jenis;
         if (aktif !== undefined) where.inv_is_active = aktif === "true" ? 1 : 0;
         if (q) where.inv_nama = { [Op.like]: `%${q}%` };
 
@@ -32,14 +32,14 @@ const getJenis = async (req, res, next) => {
         const rows = await Inventaris.findAll({
             attributes: [
                 [
-                    sequelize.fn("DISTINCT", sequelize.col("inv_jenis")),
-                    "inv_jenis",
+                    sequelize.fn("DISTINCT", sequelize.col("inv_jenis_id")),
+                    "inv_jenis_id",
                 ],
             ],
             where: { inv_is_active: 1 },
-            order: [["inv_jenis", "ASC"]],
+            order: [["inv_jenis_id", "ASC"]],
         });
-        const list = rows.map((row) => row.inv_jenis);
+        const list = rows.map((row) => row.inv_jenis_id);
         return response.ok(res, list);
     } catch (err) {
         next(err);
@@ -65,7 +65,7 @@ const create = async (req, res, next) => {
             inv_no,
             inv_nama,
             inv_kategori,
-            inv_jenis,
+            inv_jenis_id,
             inv_lokasi,
             inv_merk,
             inv_serial_number,
@@ -75,7 +75,7 @@ const create = async (req, res, next) => {
             inv_notes,
         } = req.body;
 
-        if (!inv_no || !inv_nama || !inv_kategori || !inv_jenis) {
+        if (!inv_no || !inv_nama || !inv_kategori || !inv_jenis_id) {
             return response.error(
                 res,
                 "No inventaris, nama, kategori, dan jenis wajib diisi",
@@ -91,7 +91,7 @@ const create = async (req, res, next) => {
             inv_no,
             inv_nama,
             inv_kategori,
-            inv_jenis,
+            inv_jenis_id,
             inv_lokasi,
             inv_merk,
             inv_serial_number,
@@ -117,7 +117,7 @@ const update = async (req, res, next) => {
             "inv_no",
             "inv_nama",
             "inv_kategori",
-            "inv_jenis",
+            "inv_jenis_id",
             "inv_lokasi",
             "inv_merk",
             "inv_serial_number",

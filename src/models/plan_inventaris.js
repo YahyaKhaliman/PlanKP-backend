@@ -18,18 +18,13 @@ module.exports = function (sequelize, DataTypes) {
                 type: DataTypes.STRING(150),
                 allowNull: false,
             },
-            inv_kategori: {
-                type: DataTypes.ENUM(
-                    "Mesin Jahit",
-                    "Mesin Umum",
-                    "Hardware",
-                    "APAR",
-                ),
+            inv_jenis_id: {
+                type: DataTypes.INTEGER,
                 allowNull: false,
-            },
-            inv_jenis: {
-                type: DataTypes.STRING(100),
-                allowNull: false,
+                references: {
+                    model: "plan_jenis",
+                    key: "jenis_id",
+                },
             },
             inv_lokasi: {
                 type: DataTypes.STRING(100),
@@ -44,12 +39,8 @@ module.exports = function (sequelize, DataTypes) {
                 allowNull: true,
             },
             inv_pic: {
-                type: DataTypes.INTEGER,
+                type: DataTypes.STRING(100),
                 allowNull: true,
-                references: {
-                    model: "plan_user",
-                    key: "user_id",
-                },
             },
             inv_tgl_beli: {
                 type: DataTypes.DATEONLY,
@@ -78,6 +69,7 @@ module.exports = function (sequelize, DataTypes) {
                 type: DataTypes.DATE,
                 allowNull: false,
                 defaultValue: Sequelize.Sequelize.literal("CURRENT_TIMESTAMP"),
+                onUpdate: Sequelize.Sequelize.literal("CURRENT_TIMESTAMP"),
             },
         },
         {
@@ -98,14 +90,9 @@ module.exports = function (sequelize, DataTypes) {
                     fields: [{ name: "inv_no" }],
                 },
                 {
-                    name: "idx_inv_kategori",
-                    using: "BTREE",
-                    fields: [{ name: "inv_kategori" }],
-                },
-                {
                     name: "idx_inv_jenis",
                     using: "BTREE",
-                    fields: [{ name: "inv_jenis" }],
+                    fields: [{ name: "inv_jenis_id" }],
                 },
                 {
                     name: "idx_inv_active",

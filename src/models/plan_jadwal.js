@@ -13,9 +13,13 @@ module.exports = function (sequelize, DataTypes) {
                 type: DataTypes.STRING(150),
                 allowNull: false,
             },
-            jdw_inv_jenis: {
-                type: DataTypes.STRING(100),
+            jdw_jenis_id: {
+                type: DataTypes.INTEGER,
                 allowNull: false,
+                references: {
+                    model: "plan_jenis",
+                    key: "jenis_id",
+                },
             },
             jdw_divisi: {
                 type: DataTypes.ENUM(
@@ -101,7 +105,7 @@ module.exports = function (sequelize, DataTypes) {
                 {
                     name: "idx_jdw_jenis",
                     using: "BTREE",
-                    fields: [{ name: "jdw_inv_jenis" }],
+                    fields: [{ name: "jdw_jenis_id" }],
                 },
                 {
                     name: "idx_jdw_divisi",

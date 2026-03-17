@@ -31,29 +31,28 @@ const getAll = async (req, res, next) => {
             include: [
                 {
                     model: Jadwal,
-                    as: "jadwal",
+                    as: "real_jadwal",
                     attributes: [
                         "jdw_id",
                         "jdw_judul",
-                        "jdw_inv_jenis",
                         "jdw_frekuensi",
+                        "jdw_divisi",
                     ],
                 },
                 {
                     model: Inventaris,
-                    as: "inventaris",
+                    as: "real_inv",
                     attributes: [
                         "inv_id",
                         "inv_no",
                         "inv_nama",
-                        "inv_jenis",
                         "inv_lokasi",
                         "inv_pic",
                     ],
                 },
                 {
                     model: User,
-                    as: "teknisi",
+                    as: "real_teknisi",
                     attributes: ["user_id", "user_nama"],
                 },
             ],
@@ -70,16 +69,16 @@ const getOne = async (req, res, next) => {
     try {
         const data = await Realisasi.findByPk(req.params.id, {
             include: [
-                { model: Jadwal, as: "jadwal" },
-                { model: Inventaris, as: "inventaris" },
+                { model: Jadwal, as: "real_jadwal" },
+                { model: Inventaris, as: "real_inv" },
                 {
                     model: User,
-                    as: "teknisi",
+                    as: "real_teknisi",
                     attributes: ["user_id", "user_nama"],
                 },
                 {
                     model: User,
-                    as: "approver",
+                    as: "real_approved_by_plan_user",
                     attributes: ["user_id", "user_nama"],
                 },
                 {
@@ -133,6 +132,21 @@ const create = async (req, res, next) => {
         const tahun = tgl.getFullYear();
         const weekNo =
             Math.ceil((tgl - new Date(tahun, 0, 1)) / 86400000 / 7) + 1;
+
+        const exists = await Realisasi.findOne({
+            where: {
+                real_jadwal_id,
+                real_inv_id,
+                real_tgl,
+                real_status: { [Op.ne]: "Ditolak" },
+            },
+        });
+        if (exists)
+            return response.error(
+                res,
+                "Sudah ada realisasi untuk unit ini pada tanggal tersebut",
+                400,
+            );
 
         const data = await Realisasi.create({
             real_jadwal_id,
@@ -230,6 +244,7 @@ const saveTtd = async (req, res, next) => {
         real.real_ttd_pic_nama = real_ttd_pic_nama;
         real.real_ttd_data = real_ttd_data;
         real.real_ttd_at = new Date();
+        real.real_jam_selesai = new Date().toTimeString().split(" ")[0];
         real.real_approved_by = req.user.user_id;
         real.real_approved_at = new Date();
         real.real_status = "Selesai";
@@ -247,7 +262,7 @@ const saveTtd = async (req, res, next) => {
 const getTemplate = async (req, res, next) => {
     try {
         const data = await ChecklistTemplate.findAll({
-            where: { ct_inv_jenis: req.params.inv_jenis, ct_is_active: 1 },
+            where: { ct_jenis_id: req.params.inv_jenis, ct_is_active: 1 },
             order: [["ct_urutan", "ASC"]],
         });
         return response.ok(res, data);

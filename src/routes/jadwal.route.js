@@ -6,7 +6,7 @@ router.use(verifyToken);
 
 // ── Jadwal ─────────────────────────────────────────────────────
 router.get("/jadwal/hari-ini", jadwal.hariIni);
-router.get("/jadwal", jadwal.getAll);
+router.get("/jadwal", allowOnly("admin"), jadwal.getAll);
 router.get("/jadwal/divisi", jadwal.getByDivisi);
 router.get("/jadwal/:id", jadwal.getOne);
 router.post("/jadwal", allowOnly("admin"), jadwal.create);

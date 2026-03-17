@@ -10,6 +10,25 @@ const {
 const { Op } = require("sequelize");
 const response = require("../utils/response");
 
+const serializeChecklist = (item) => {
+    const plain = item.get({ plain: true });
+    plain.template_item = plain.hc_ct || null;
+    return plain;
+};
+
+const serializeRealisasi = (item) => {
+    const plain = item.get({ plain: true });
+    plain.jadwal = plain.real_jadwal || null;
+    plain.inventaris = plain.real_inv || null;
+    plain.teknisi = plain.real_teknisi || null;
+    if (Array.isArray(plain.plan_hasil_checklists)) {
+        plain.hasil_checklist = plain.plan_hasil_checklists
+            .map(serializeChecklist)
+            .sort((left, right) => left.hc_ct_id - right.hc_ct_id);
+    }
+    return plain;
+};
+
 // GET /realisasi?jadwal_id=1&status=Draft&bulan=3&tahun=2025
 const getAll = async (req, res, next) => {
     try {
@@ -58,7 +77,7 @@ const getAll = async (req, res, next) => {
             ],
             order: [["real_tgl", "DESC"]],
         });
-        return response.ok(res, data);
+        return response.ok(res, data.map(serializeRealisasi));
     } catch (err) {
         next(err);
     }
@@ -83,11 +102,11 @@ const getOne = async (req, res, next) => {
                 },
                 {
                     model: HasilChecklist,
-                    as: "hasil_checklist",
+                    as: "plan_hasil_checklists",
                     include: [
                         {
                             model: ChecklistTemplate,
-                            as: "template_item",
+                            as: "hc_ct",
                             attributes: [
                                 "ct_id",
                                 "ct_item",
@@ -96,12 +115,11 @@ const getOne = async (req, res, next) => {
                             ],
                         },
                     ],
-                    order: [["hc_ct_id", "ASC"]],
                 },
             ],
         });
         if (!data) return response.error(res, "Realisasi tidak ditemukan", 404);
-        return response.ok(res, data);
+        return response.ok(res, serializeRealisasi(data));
     } catch (err) {
         next(err);
     }

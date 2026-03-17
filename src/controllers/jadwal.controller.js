@@ -7,6 +7,19 @@ const UserService = require("../services/user.service");
 const { Op } = require("sequelize");
 const response = require("../utils/response");
 
+const serializeJadwal = (item) => {
+    const plain = item.get({ plain: true });
+    plain.assigned_user = plain.jdw_assigned_to_plan_user || null;
+    plain.dibuat_user = plain.jdw_dibuat_oleh_plan_user || null;
+    return plain;
+};
+
+const serializeInventaris = (item) => {
+    const plain = item.get({ plain: true });
+    plain.inv_jenis = plain.inv_jenis_id;
+    return plain;
+};
+
 // helper: hitung week_number dari tanggal
 const getWeekNumber = (dateStr) => {
     const d = new Date(dateStr);
@@ -22,7 +35,7 @@ const getAll = async (req, res, next) => {
             req.query;
         const where = {};
         if (status) where.jdw_status = status;
-        if (jenis) where.jdw_inv_jenis = jenis;
+        if (jenis) where.jdw_jenis_id = jenis;
         if (assigned_to) where.jdw_assigned_to = assigned_to;
         if (bulan) where.jdw_bulan = bulan;
         if (tahun) where.jdw_tahun = tahun;
@@ -72,7 +85,7 @@ const getAll = async (req, res, next) => {
             ],
             order: [["jdw_tgl_mulai", "DESC"]],
         });
-        return response.ok(res, data);
+        return response.ok(res, data.map(serializeJadwal));
     } catch (err) {
         next(err);
     }
@@ -83,7 +96,7 @@ const getByDivisi = async (req, res, next) => {
         const { status, jenis, tgl } = req.query;
         const where = { jdw_divisi: req.user.user_divisi };
         if (status) where.jdw_status = status;
-        if (jenis) where.jdw_inv_jenis = jenis;
+        if (jenis) where.jdw_jenis_id = jenis;
         if (tgl) {
             where[Op.and] = where[Op.and] || [];
             where[Op.and].push({ jdw_tgl_mulai: { [Op.lte]: tgl } });
@@ -100,13 +113,23 @@ const getByDivisi = async (req, res, next) => {
             include: [
                 {
                     model: User,
+                    as: "jdw_assigned_to_plan_user",
+                    attributes: [
+                        "user_id",
+                        "user_nama",
+                        "user_jabatan",
+                        "user_divisi",
+                    ],
+                },
+                {
+                    model: User,
                     as: "jdw_dibuat_oleh_plan_user",
                     attributes: ["user_id", "user_nama"],
                 },
             ],
             order: [["jdw_tgl_mulai", "DESC"]],
         });
-        return response.ok(res, data);
+        return response.ok(res, data.map(serializeJadwal));
     } catch (err) {
         next(err);
     }
@@ -147,12 +170,12 @@ const getOne = async (req, res, next) => {
 
         // ambil inventaris dengan jenis yang sama
         const inventarisList = await Inventaris.findAll({
-            where: { inv_jenis: data.jdw_inv_jenis, inv_is_active: 1 },
+            where: { inv_jenis_id: data.jdw_jenis_id, inv_is_active: 1 },
             attributes: [
                 "inv_id",
                 "inv_no",
                 "inv_nama",
-                "inv_jenis",
+                "inv_jenis_id",
                 "inv_lokasi",
                 "inv_pic",
                 "inv_kondisi",
@@ -167,7 +190,10 @@ const getOne = async (req, res, next) => {
             order: [["inv_nama", "ASC"]],
         });
 
-        return response.ok(res, { jadwal: data, inventaris: inventarisList });
+        return response.ok(res, {
+            jadwal: serializeJadwal(data),
+            inventaris: inventarisList.map(serializeInventaris),
+        });
     } catch (err) {
         next(err);
     }
@@ -179,7 +205,6 @@ const create = async (req, res, next) => {
         const {
             jdw_judul,
             jdw_jenis_id,
-            jdw_inv_jenis,
             jdw_divisi,
             jdw_frekuensi,
             jdw_tgl_mulai,
@@ -191,7 +216,6 @@ const create = async (req, res, next) => {
         if (
             !jdw_judul ||
             !jdw_jenis_id ||
-            !jdw_inv_jenis ||
             !jdw_divisi ||
             !jdw_frekuensi ||
             !jdw_tgl_mulai
@@ -210,7 +234,6 @@ const create = async (req, res, next) => {
         const data = await Jadwal.create({
             jdw_judul,
             jdw_jenis_id,
-            jdw_inv_jenis,
             jdw_divisi,
             jdw_frekuensi,
             jdw_tgl_mulai,
@@ -245,7 +268,6 @@ const update = async (req, res, next) => {
         const fields = [
             "jdw_judul",
             "jdw_jenis_id",
-            "jdw_inv_jenis",
             "jdw_frekuensi",
             "jdw_divisi",
             "jdw_tgl_mulai",
@@ -312,13 +334,13 @@ const hariIni = async (req, res, next) => {
             include: [
                 {
                     model: User,
-                    as: "assigned_user",
+                    as: "jdw_assigned_to_plan_user",
                     attributes: ["user_id", "user_nama", "user_jabatan"],
                 },
             ],
-            order: [["jdw_inv_jenis", "ASC"]],
+            order: [["jdw_tgl_mulai", "ASC"]],
         });
-        return response.ok(res, data);
+        return response.ok(res, data.map(serializeJadwal));
     } catch (err) {
         next(err);
     }

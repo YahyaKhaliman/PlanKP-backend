@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const UserService = require("./user.service");
+const { normalizeDivisi } = require("../utils/divisi");
 
 class AuthService {
     static async authenticate({ user_nama, user_password }) {
@@ -44,12 +45,18 @@ class AuthService {
         }
 
         const nik = (user_nik || user_nama).trim();
+        const normalizedDivisi = normalizeDivisi(user_divisi);
+        if (!normalizedDivisi) {
+            const err = new Error("Divisi tidak valid");
+            err.status = 400;
+            throw err;
+        }
 
         const created = await UserService.createUser({
             user_nama,
             user_nik: nik,
             user_password,
-            user_divisi,
+            user_divisi: normalizedDivisi,
             user_jabatan: user_jabatan || "user",
             user_cabang,
             user_is_active: 1,

@@ -6,6 +6,7 @@ const {
 const UserService = require("../services/user.service");
 const { Op } = require("sequelize");
 const response = require("../utils/response");
+const { normalizeDivisi } = require("../utils/divisi");
 
 const serializeJadwal = (item) => {
     const plain = item.get({ plain: true });
@@ -39,7 +40,12 @@ const getAll = async (req, res, next) => {
         if (assigned_to) where.jdw_assigned_to = assigned_to;
         if (bulan) where.jdw_bulan = bulan;
         if (tahun) where.jdw_tahun = tahun;
-        if (divisi) where.jdw_divisi = divisi;
+        if (divisi) {
+            const normalizedDivisi = normalizeDivisi(divisi);
+            if (!normalizedDivisi)
+                return response.error(res, "Divisi tidak valid", 400);
+            where.jdw_divisi = normalizedDivisi;
+        }
 
         // filter jadwal yang aktif pada tanggal tertentu
         if (tgl) {
@@ -54,11 +60,12 @@ const getAll = async (req, res, next) => {
         }
 
         const isAdmin = req.user.user_jabatan === "admin";
+        const userDivisi = normalizeDivisi(req.user.user_divisi);
         if (!isAdmin) {
             where[Op.and] = where[Op.and] || [];
             where[Op.and].push({
                 [Op.or]: [
-                    { jdw_divisi: req.user.user_divisi },
+                    { jdw_divisi: userDivisi || req.user.user_divisi },
                     { jdw_assigned_to: req.user.user_id },
                 ],
             });
@@ -94,7 +101,8 @@ const getAll = async (req, res, next) => {
 const getByDivisi = async (req, res, next) => {
     try {
         const { status, jenis, tgl } = req.query;
-        const where = { jdw_divisi: req.user.user_divisi };
+        const userDivisi = normalizeDivisi(req.user.user_divisi);
+        const where = { jdw_divisi: userDivisi || req.user.user_divisi };
         if (status) where.jdw_status = status;
         if (jenis) where.jdw_jenis_id = jenis;
         if (tgl) {
@@ -160,9 +168,10 @@ const getOne = async (req, res, next) => {
         if (!data) return response.error(res, "Jadwal tidak ditemukan", 404);
 
         const isAdmin = req.user.user_jabatan === "admin";
+        const userDivisi = normalizeDivisi(req.user.user_divisi);
         if (
             !isAdmin &&
-            data.jdw_divisi !== req.user.user_divisi &&
+            data.jdw_divisi !== (userDivisi || req.user.user_divisi) &&
             data.jdw_assigned_to !== req.user.user_id
         ) {
             return response.error(res, "Akses jadwal ditolak", 403);
@@ -212,6 +221,7 @@ const create = async (req, res, next) => {
             jdw_assigned_to,
             jdw_notes,
         } = req.body;
+        const normalizedDivisi = normalizeDivisi(jdw_divisi);
 
         if (
             !jdw_judul ||
@@ -225,6 +235,8 @@ const create = async (req, res, next) => {
                 "Judul, jenis inventaris, divisi, frekuensi, dan tanggal mulai wajib diisi",
                 400,
             );
+        if (!normalizedDivisi)
+            return response.error(res, "Divisi tidak valid", 400);
 
         const tgl = new Date(jdw_tgl_mulai);
         const bulan = tgl.getMonth() + 1;
@@ -234,7 +246,7 @@ const create = async (req, res, next) => {
         const data = await Jadwal.create({
             jdw_judul,
             jdw_jenis_id,
-            jdw_divisi,
+            jdw_divisi: normalizedDivisi,
             jdw_frekuensi,
             jdw_tgl_mulai,
             jdw_tgl_selesai: jdw_tgl_selesai || null,
@@ -278,6 +290,12 @@ const update = async (req, res, next) => {
         fields.forEach((f) => {
             if (req.body[f] !== undefined) data[f] = req.body[f];
         });
+        if (req.body.jdw_divisi !== undefined) {
+            const normalizedDivisi = normalizeDivisi(req.body.jdw_divisi);
+            if (!normalizedDivisi)
+                return response.error(res, "Divisi tidak valid", 400);
+            data.jdw_divisi = normalizedDivisi;
+        }
 
         // recalculate periode jika tgl_mulai berubah
         if (req.body.jdw_tgl_mulai) {
@@ -323,7 +341,8 @@ const hariIni = async (req, res, next) => {
                 { jdw_tgl_selesai: null },
                 { jdw_tgl_selesai: { [Op.gte]: today } },
             ],
-            jdw_divisi: req.user.user_divisi,
+            jdw_divisi:
+                normalizeDivisi(req.user.user_divisi) || req.user.user_divisi,
         };
 
         const isAdmin = req.user.user_jabatan === "admin";

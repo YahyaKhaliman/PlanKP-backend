@@ -2,7 +2,7 @@ const router = require("express").Router();
 const { verifyToken, allowOnly } = require("../middleware/auth");
 const user = require("../controllers/user.controller");
 
-router.use(verifyToken, allowOnly("admin"));
+router.use("/users", verifyToken, allowOnly("admin"));
 
 router.get("/users/mapping-kategori", user.getMappingKategori);
 router.get("/users", user.getAll);

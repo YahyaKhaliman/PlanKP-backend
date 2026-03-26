@@ -1,6 +1,7 @@
 const { plan_user: User } = require("../models");
 const { Op } = require("sequelize");
 const response = require("../utils/response");
+const { normalizeDivisi } = require("../utils/divisi");
 
 // Mapping inv_kategori → user_divisi
 const KATEGORI_DIVISI = {
@@ -26,7 +27,12 @@ const getAll = async (req, res, next) => {
         if (jabatan) where.user_jabatan = jabatan;
 
         // filter by divisi langsung
-        if (divisi) where.user_divisi = divisi;
+        if (divisi) {
+            const normalizedDivisi = normalizeDivisi(divisi);
+            if (!normalizedDivisi)
+                return response.error(res, "Divisi tidak valid", 400);
+            where.user_divisi = normalizedDivisi;
+        }
 
         // filter by kategori inventaris → otomatis resolve divisi
         if (kategori && KATEGORI_DIVISI[kategori]) {
@@ -59,6 +65,7 @@ const create = async (req, res, next) => {
             user_divisi,
             user_cabang,
         } = req.body;
+        const normalizedDivisi = normalizeDivisi(user_divisi);
         if (
             !user_nama ||
             !user_nik ||
@@ -71,6 +78,8 @@ const create = async (req, res, next) => {
                 "Nama, NIK, password, jabatan, dan divisi wajib diisi",
                 400,
             );
+        if (!normalizedDivisi)
+            return response.error(res, "Divisi tidak valid", 400);
 
         const exists = await User.findOne({ where: { user_nik } });
         if (exists) return response.error(res, "NIK sudah digunakan", 400);
@@ -81,7 +90,7 @@ const create = async (req, res, next) => {
             user_nik,
             user_password: hashed,
             user_jabatan,
-            user_divisi,
+            user_divisi: normalizedDivisi,
             user_cabang,
         });
         return response.created(res, data, "User berhasil ditambahkan");
@@ -104,10 +113,14 @@ const update = async (req, res, next) => {
             user_cabang,
             user_password,
         } = req.body;
+        const normalizedDivisi =
+            user_divisi !== undefined ? normalizeDivisi(user_divisi) : null;
+        if (user_divisi !== undefined && !normalizedDivisi)
+            return response.error(res, "Divisi tidak valid", 400);
 
         if (user_nama) data.user_nama = user_nama;
         if (user_jabatan) data.user_jabatan = user_jabatan;
-        if (user_divisi) data.user_divisi = user_divisi;
+        if (user_divisi !== undefined) data.user_divisi = normalizedDivisi;
         if (user_cabang !== undefined) data.user_cabang = user_cabang;
 
         if (user_nik && user_nik !== data.user_nik) {

@@ -87,14 +87,6 @@ module.exports = function (sequelize, DataTypes) {
                 type: DataTypes.DATE,
                 allowNull: true,
             },
-            real_approved_by: {
-                type: DataTypes.INTEGER,
-                allowNull: true,
-                references: {
-                    model: "plan_user",
-                    key: "user_id",
-                },
-            },
             real_approved_at: {
                 type: DataTypes.DATE,
                 allowNull: true,
@@ -158,11 +150,6 @@ module.exports = function (sequelize, DataTypes) {
                         { name: "real_bulan" },
                         { name: "real_week_number" },
                     ],
-                },
-                {
-                    name: "fk_real_approved",
-                    using: "BTREE",
-                    fields: [{ name: "real_approved_by" }],
                 },
             ],
         },

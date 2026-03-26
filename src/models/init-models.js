@@ -100,14 +100,6 @@ function initModels(sequelize) {
         foreignKey: "ct_jenis_id",
     });
     plan_realisasi.belongsTo(plan_user, {
-        as: "real_approved_by_plan_user",
-        foreignKey: "real_approved_by",
-    });
-    plan_user.hasMany(plan_realisasi, {
-        as: "plan_realisasis",
-        foreignKey: "real_approved_by",
-    });
-    plan_realisasi.belongsTo(plan_user, {
         as: "real_teknisi",
         foreignKey: "real_teknisi_id",
     });

@@ -96,11 +96,6 @@ const getOne = async (req, res, next) => {
                     attributes: ["user_id", "user_nama"],
                 },
                 {
-                    model: User,
-                    as: "real_approved_by_plan_user",
-                    attributes: ["user_id", "user_nama"],
-                },
-                {
                     model: HasilChecklist,
                     as: "plan_hasil_checklists",
                     include: [
@@ -263,7 +258,6 @@ const saveTtd = async (req, res, next) => {
         real.real_ttd_data = real_ttd_data;
         real.real_ttd_at = new Date();
         real.real_jam_selesai = new Date().toTimeString().split(" ")[0];
-        real.real_approved_by = req.user.user_id;
         real.real_approved_at = new Date();
         real.real_status = "Selesai";
         await real.save({ transaction: t });

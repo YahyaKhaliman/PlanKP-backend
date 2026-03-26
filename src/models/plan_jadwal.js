@@ -64,9 +64,9 @@ module.exports = function (sequelize, DataTypes) {
                 },
             },
             jdw_status: {
-                type: DataTypes.ENUM("Draft", "Aktif", "Selesai", "Dibatalkan"),
+                type: DataTypes.ENUM("Aktif", "Nonaktif"),
                 allowNull: false,
-                defaultValue: "Draft",
+                defaultValue: "Aktif",
             },
             jdw_notes: {
                 type: DataTypes.TEXT,

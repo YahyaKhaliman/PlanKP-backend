@@ -2,6 +2,7 @@ const {
     plan_jadwal: Jadwal,
     plan_user: User,
     plan_inventaris: Inventaris,
+    sequelize,
 } = require("../models");
 const UserService = require("../services/user.service");
 const { Op } = require("sequelize");
@@ -73,6 +74,28 @@ const getAll = async (req, res, next) => {
 
         const data = await Jadwal.findAll({
             where,
+            attributes: {
+                include: [
+                    [
+                        sequelize.literal(`(
+                            SELECT COUNT(*)
+                            FROM plan_inventaris i
+                            WHERE i.inv_jenis_id = plan_jadwal.jdw_jenis_id
+                              AND i.inv_is_active = 1
+                        )`),
+                        "jdw_total_unit",
+                    ],
+                    [
+                        sequelize.literal(`(
+                            SELECT COUNT(DISTINCT r.real_inv_id)
+                            FROM plan_realisasi r
+                            WHERE r.real_jadwal_id = plan_jadwal.jdw_id
+                              AND r.real_status = 'Selesai'
+                        )`),
+                        "jdw_selesai_unit",
+                    ],
+                ],
+            },
             include: [
                 {
                     model: User,
@@ -118,6 +141,28 @@ const getByDivisi = async (req, res, next) => {
 
         const data = await Jadwal.findAll({
             where,
+            attributes: {
+                include: [
+                    [
+                        sequelize.literal(`(
+                            SELECT COUNT(*)
+                            FROM plan_inventaris i
+                            WHERE i.inv_jenis_id = plan_jadwal.jdw_jenis_id
+                              AND i.inv_is_active = 1
+                        )`),
+                        "jdw_total_unit",
+                    ],
+                    [
+                        sequelize.literal(`(
+                            SELECT COUNT(DISTINCT r.real_inv_id)
+                            FROM plan_realisasi r
+                            WHERE r.real_jadwal_id = plan_jadwal.jdw_id
+                              AND r.real_status = 'Selesai'
+                        )`),
+                        "jdw_selesai_unit",
+                    ],
+                ],
+            },
             include: [
                 {
                     model: User,
@@ -255,7 +300,7 @@ const create = async (req, res, next) => {
             jdw_tahun: tahun,
             jdw_assigned_to: jdw_assigned_to || null,
             jdw_notes: jdw_notes || null,
-            jdw_status: "Draft",
+            jdw_status: "Aktif",
             jdw_dibuat_oleh: req.user.user_id,
         });
 
@@ -270,13 +315,6 @@ const update = async (req, res, next) => {
     try {
         const data = await Jadwal.findByPk(req.params.id);
         if (!data) return response.error(res, "Jadwal tidak ditemukan", 404);
-        if (data.jdw_status === "Selesai")
-            return response.error(
-                res,
-                "Jadwal yang sudah selesai tidak bisa diubah",
-                400,
-            );
-
         const fields = [
             "jdw_judul",
             "jdw_jenis_id",
@@ -312,11 +350,11 @@ const update = async (req, res, next) => {
     }
 };
 
-// PATCH /jadwal/:id/status  — body: { status: 'Aktif' }
+// PATCH /jadwal/:id/status  — body: { status: 'Aktif' | 'Nonaktif' }
 const updateStatus = async (req, res, next) => {
     try {
         const { status } = req.body;
-        const allowed = ["Draft", "Aktif", "Selesai", "Dibatalkan"];
+        const allowed = ["Aktif", "Nonaktif"];
         if (!allowed.includes(status))
             return response.error(res, "Status tidak valid", 400);
 
@@ -333,7 +371,16 @@ const updateStatus = async (req, res, next) => {
 // GET /jadwal/hari-ini — jadwal aktif hari ini untuk user yang login
 const hariIni = async (req, res, next) => {
     try {
-        const today = new Date().toISOString().split("T")[0];
+        const now = new Date();
+        const today = now.toISOString().split("T")[0];
+        const todayDay = now.getDay();
+        const todayDate = now.getDate();
+        const frekuensiHariIni = [{ jdw_frekuensi: "Harian" }];
+        if (todayDay === 1)
+            frekuensiHariIni.push({ jdw_frekuensi: "Mingguan" });
+        if (todayDate === 1)
+            frekuensiHariIni.push({ jdw_frekuensi: "Bulanan" });
+
         const where = {
             jdw_status: "Aktif",
             jdw_tgl_mulai: { [Op.lte]: today },
@@ -341,6 +388,7 @@ const hariIni = async (req, res, next) => {
                 { jdw_tgl_selesai: null },
                 { jdw_tgl_selesai: { [Op.gte]: today } },
             ],
+            [Op.and]: [{ [Op.or]: frekuensiHariIni }],
             jdw_divisi:
                 normalizeDivisi(req.user.user_divisi) || req.user.user_divisi,
         };

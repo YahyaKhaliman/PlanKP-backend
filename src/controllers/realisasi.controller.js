@@ -7,8 +7,9 @@ const {
     plan_user: User,
     sequelize,
 } = require("../models");
-const { Op } = require("sequelize");
+const { Op, QueryTypes } = require("sequelize");
 const response = require("../utils/response");
+const { normalizeDivisi } = require("../utils/divisi");
 
 const serializeChecklist = (item) => {
     const plain = item.get({ plain: true });
@@ -32,32 +33,40 @@ const serializeRealisasi = (item) => {
 // GET /realisasi?jadwal_id=1&status=Draft&bulan=3&tahun=2025
 const getAll = async (req, res, next) => {
     try {
-        const { jadwal_id, status, bulan, tahun, teknisi_id } = req.query;
+        const { jadwal_id, status, bulan, tahun, teknisi_id, by_divisi } =
+            req.query;
         const where = {};
+        const includeJadwal = {
+            model: Jadwal,
+            as: "real_jadwal",
+            attributes: ["jdw_id", "jdw_judul", "jdw_frekuensi", "jdw_divisi"],
+        };
         if (jadwal_id) where.real_jadwal_id = jadwal_id;
         if (status) where.real_status = status;
         if (bulan) where.real_bulan = bulan;
         if (tahun) where.real_tahun = tahun;
         if (teknisi_id) where.real_teknisi_id = teknisi_id;
 
+        const useDivisiScope = String(by_divisi || "").toLowerCase() === "true";
+        const isAdmin = req.user.user_jabatan === "admin";
+        if (useDivisiScope && !isAdmin) {
+            const userDivisi =
+                normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
+            includeJadwal.where = { jdw_divisi: userDivisi };
+        }
+
         // teknisi & it_support hanya lihat realisasi mereka sendiri
-        if (["teknisi", "it_support"].includes(req.user.user_jabatan)) {
+        if (
+            ["teknisi", "it_support"].includes(req.user.user_jabatan) &&
+            !useDivisiScope
+        ) {
             where.real_teknisi_id = req.user.user_id;
         }
 
         const data = await Realisasi.findAll({
             where,
             include: [
-                {
-                    model: Jadwal,
-                    as: "real_jadwal",
-                    attributes: [
-                        "jdw_id",
-                        "jdw_judul",
-                        "jdw_frekuensi",
-                        "jdw_divisi",
-                    ],
-                },
+                includeJadwal,
                 {
                     model: Inventaris,
                     as: "real_inv",
@@ -86,35 +95,129 @@ const getAll = async (req, res, next) => {
 // GET /realisasi/:id  — detail lengkap dengan hasil checklist
 const getOne = async (req, res, next) => {
     try {
-        const data = await Realisasi.findByPk(req.params.id, {
+        const rows = await sequelize.query(
+            `
+            SELECT
+                r.real_id,
+                r.real_jadwal_id,
+                r.real_inv_id,
+                r.real_teknisi_id,
+                r.real_tgl,
+                r.real_jam_mulai,
+                r.real_jam_selesai,
+                r.real_week_number,
+                r.real_bulan,
+                r.real_tahun,
+                r.real_kondisi_akhir,
+                r.real_keterangan,
+                r.real_status,
+                r.real_ttd_pic_nama,
+                r.real_ttd_data,
+                r.real_ttd_at,
+                r.real_approved_at,
+                v.jdw_judul,
+                v.jdw_frekuensi,
+                v.jdw_divisi,
+                v.jdw_jenis_nama,
+                v.jdw_jenis_kategori,
+                v.inv_no,
+                v.inv_nama,
+                v.inv_pic,
+                v.inv_kondisi_awal,
+                v.inv_lokasi,
+                v.teknisi_nama,
+                v.teknisi_divisi,
+                v.approver_nama
+            FROM plan_realisasi r
+            LEFT JOIN v_realisasi_detail v ON v.real_id = r.real_id
+            WHERE r.real_id = :realId
+            LIMIT 1
+            `,
+            {
+                replacements: { realId: req.params.id },
+                type: QueryTypes.SELECT,
+            },
+        );
+
+        const row = rows[0];
+        if (!row) return response.error(res, "Realisasi tidak ditemukan", 404);
+
+        const isAdmin = req.user.user_jabatan === "admin";
+        if (!isAdmin) {
+            const userDivisi =
+                normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
+            if (row.jdw_divisi && row.jdw_divisi !== userDivisi) {
+                return response.error(
+                    res,
+                    "Akses detail realisasi ditolak",
+                    403,
+                );
+            }
+        }
+
+        const checklistRows = await HasilChecklist.findAll({
+            where: { hc_real_id: req.params.id },
             include: [
-                { model: Jadwal, as: "real_jadwal" },
-                { model: Inventaris, as: "real_inv" },
                 {
-                    model: User,
-                    as: "real_teknisi",
-                    attributes: ["user_id", "user_nama"],
-                },
-                {
-                    model: HasilChecklist,
-                    as: "plan_hasil_checklists",
-                    include: [
-                        {
-                            model: ChecklistTemplate,
-                            as: "hc_ct",
-                            attributes: [
-                                "ct_id",
-                                "ct_item",
-                                "ct_keterangan",
-                                "ct_urutan",
-                            ],
-                        },
+                    model: ChecklistTemplate,
+                    as: "hc_ct",
+                    attributes: [
+                        "ct_id",
+                        "ct_item",
+                        "ct_keterangan",
+                        "ct_urutan",
                     ],
                 },
             ],
+            order: [
+                [{ model: ChecklistTemplate, as: "hc_ct" }, "ct_urutan", "ASC"],
+            ],
         });
-        if (!data) return response.error(res, "Realisasi tidak ditemukan", 404);
-        return response.ok(res, serializeRealisasi(data));
+
+        const payload = {
+            real_id: row.real_id,
+            real_jadwal_id: row.real_jadwal_id,
+            real_inv_id: row.real_inv_id,
+            real_teknisi_id: row.real_teknisi_id,
+            real_tgl: row.real_tgl,
+            real_jam_mulai: row.real_jam_mulai,
+            real_jam_selesai: row.real_jam_selesai,
+            real_week_number: row.real_week_number,
+            real_bulan: row.real_bulan,
+            real_tahun: row.real_tahun,
+            real_kondisi_akhir: row.real_kondisi_akhir,
+            real_keterangan: row.real_keterangan,
+            real_status: row.real_status,
+            real_ttd_pic_nama: row.real_ttd_pic_nama,
+            real_ttd_data: row.real_ttd_data,
+            real_ttd_at: row.real_ttd_at,
+            real_approved_at: row.real_approved_at,
+            jadwal: {
+                jdw_id: row.real_jadwal_id,
+                jdw_judul: row.jdw_judul,
+                jdw_frekuensi: row.jdw_frekuensi,
+                jdw_divisi: row.jdw_divisi,
+                jdw_jenis_nama: row.jdw_jenis_nama,
+                jdw_jenis_kategori: row.jdw_jenis_kategori,
+            },
+            inventaris: {
+                inv_id: row.real_inv_id,
+                inv_no: row.inv_no,
+                inv_nama: row.inv_nama,
+                inv_pic: row.inv_pic,
+                inv_kondisi_awal: row.inv_kondisi_awal,
+                inv_lokasi: row.inv_lokasi,
+            },
+            teknisi: {
+                user_id: row.real_teknisi_id,
+                user_nama: row.teknisi_nama,
+                user_divisi: row.teknisi_divisi,
+            },
+            approver_nama: row.approver_nama,
+            hasil_checklist: checklistRows.map(serializeChecklist),
+        };
+
+        return response.ok(res, payload);
     } catch (err) {
         next(err);
     }

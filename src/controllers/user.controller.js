@@ -3,6 +3,8 @@ const { Op } = require("sequelize");
 const response = require("../utils/response");
 const { normalizeDivisi } = require("../utils/divisi");
 
+const ALLOWED_JABATAN = ["admin", "user"];
+
 // Mapping inv_kategori → user_divisi
 const KATEGORI_DIVISI = {
     "Mesin Jahit": ["Teknisi Jahit"],
@@ -23,8 +25,18 @@ const getAll = async (req, res, next) => {
     try {
         const { jabatan, divisi, q, kategori } = req.query;
         const where = { user_is_active: 1 };
+        const isAdmin = req.user.user_jabatan === "admin";
 
-        if (jabatan) where.user_jabatan = jabatan;
+        if (isAdmin) {
+            if (jabatan) {
+                if (!ALLOWED_JABATAN.includes(jabatan)) {
+                    return response.error(res, "Jabatan tidak valid", 400);
+                }
+                where.user_jabatan = jabatan;
+            }
+        } else {
+            where.user_jabatan = "user";
+        }
 
         // filter by divisi langsung
         if (divisi) {
@@ -78,6 +90,8 @@ const create = async (req, res, next) => {
                 "Nama, NIK, password, jabatan, dan divisi wajib diisi",
                 400,
             );
+        if (!ALLOWED_JABATAN.includes(user_jabatan))
+            return response.error(res, "Jabatan tidak valid", 400);
         if (!normalizedDivisi)
             return response.error(res, "Divisi tidak valid", 400);
 
@@ -117,6 +131,11 @@ const update = async (req, res, next) => {
             user_divisi !== undefined ? normalizeDivisi(user_divisi) : null;
         if (user_divisi !== undefined && !normalizedDivisi)
             return response.error(res, "Divisi tidak valid", 400);
+        if (
+            user_jabatan !== undefined &&
+            !ALLOWED_JABATAN.includes(user_jabatan)
+        )
+            return response.error(res, "Jabatan tidak valid", 400);
 
         if (user_nama) data.user_nama = user_nama;
         if (user_jabatan) data.user_jabatan = user_jabatan;

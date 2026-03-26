@@ -75,6 +75,14 @@ function initModels(sequelize) {
         as: "plan_inventariss",
         foreignKey: "inv_jenis_id",
     });
+    plan_inventaris.belongsTo(plan_user, {
+        as: "pic_user",
+        foreignKey: "inv_pic",
+    });
+    plan_user.hasMany(plan_inventaris, {
+        as: "pic_user_plan_inventariss",
+        foreignKey: "inv_pic",
+    });
     plan_jadwal.belongsTo(plan_jenis, {
         as: "jdw_jenis",
         foreignKey: "jdw_jenis_id",

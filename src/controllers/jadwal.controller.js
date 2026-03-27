@@ -37,6 +37,22 @@ const serializeInventaris = (item) => {
     return plain;
 };
 
+const jenisHasActiveInventaris = async (jenisId) => {
+    const normalizedJenisId = Number(jenisId);
+    if (!Number.isInteger(normalizedJenisId) || normalizedJenisId <= 0) {
+        return false;
+    }
+
+    const total = await Inventaris.count({
+        where: {
+            inv_jenis_id: normalizedJenisId,
+            inv_is_active: 1,
+        },
+    });
+
+    return total > 0;
+};
+
 // helper: hitung week_number dari tanggal
 const getWeekNumber = (dateStr) => {
     const d = new Date(dateStr);
@@ -346,6 +362,15 @@ const create = async (req, res, next) => {
         if (!normalizedDivisi)
             return response.error(res, "Divisi tidak valid", 400);
 
+        const hasInventaris = await jenisHasActiveInventaris(jdw_jenis_id);
+        if (!hasInventaris) {
+            return response.error(
+                res,
+                "Jenis inventaris belum memiliki unit inventaris aktif",
+                400,
+            );
+        }
+
         const tgl = new Date(jdw_tgl_mulai);
         const bulan = tgl.getMonth() + 1;
         const tahun = tgl.getFullYear();
@@ -396,6 +421,19 @@ const update = async (req, res, next) => {
             if (!normalizedDivisi)
                 return response.error(res, "Divisi tidak valid", 400);
             data.jdw_divisi = normalizedDivisi;
+        }
+
+        if (req.body.jdw_jenis_id !== undefined) {
+            const hasInventaris = await jenisHasActiveInventaris(
+                req.body.jdw_jenis_id,
+            );
+            if (!hasInventaris) {
+                return response.error(
+                    res,
+                    "Jenis inventaris belum memiliki unit inventaris aktif",
+                    400,
+                );
+            }
         }
 
         // recalculate periode jika tgl_mulai berubah

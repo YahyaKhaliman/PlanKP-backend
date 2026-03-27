@@ -10,6 +10,19 @@ const {
 const { Op, QueryTypes } = require("sequelize");
 const response = require("../utils/response");
 const { normalizeDivisi } = require("../utils/divisi");
+const { parsePagination, buildMeta } = require("../utils/pagination");
+
+const resolveRealisasiSort = (sortBy, orderBy) => {
+    const allowedSort = [
+        "real_tgl",
+        "real_created_at",
+        "real_updated_at",
+        "real_status",
+    ];
+    const sortField = allowedSort.includes(sortBy) ? sortBy : "real_tgl";
+    const sortOrder = String(orderBy || "DESC").toUpperCase() === "ASC" ? "ASC" : "DESC";
+    return [[sortField, sortOrder]];
+};
 
 const serializeChecklist = (item) => {
     const plain = item.get({ plain: true });
@@ -35,6 +48,8 @@ const getAll = async (req, res, next) => {
     try {
         const { jadwal_id, status, bulan, tahun, teknisi_id, by_divisi } =
             req.query;
+        const { hasPagination, limit, offset } = parsePagination(req.query);
+        const order = resolveRealisasiSort(req.query.sort, req.query.order);
         const where = {};
         const includeJadwal = {
             model: Jadwal,
@@ -63,7 +78,7 @@ const getAll = async (req, res, next) => {
             where.real_teknisi_id = req.user.user_id;
         }
 
-        const data = await Realisasi.findAll({
+        const queryOptions = {
             where,
             include: [
                 includeJadwal,
@@ -84,9 +99,31 @@ const getAll = async (req, res, next) => {
                     attributes: ["user_id", "user_nama"],
                 },
             ],
-            order: [["real_tgl", "DESC"]],
+            order,
+        };
+
+        if (!hasPagination) {
+            const data = await Realisasi.findAll(queryOptions);
+            return response.ok(res, data.map(serializeRealisasi));
+        }
+
+        const { count, rows } = await Realisasi.findAndCountAll({
+            ...queryOptions,
+            limit,
+            offset,
+            distinct: true,
+            col: "real_id",
         });
-        return response.ok(res, data.map(serializeRealisasi));
+
+        return response.ok(res, {
+            items: rows.map(serializeRealisasi),
+            meta: buildMeta({
+                total: count,
+                limit,
+                offset,
+                itemCount: rows.length,
+            }),
+        });
     } catch (err) {
         next(err);
     }

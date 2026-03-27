@@ -8,6 +8,21 @@ const UserService = require("../services/user.service");
 const { Op } = require("sequelize");
 const response = require("../utils/response");
 const { normalizeDivisi } = require("../utils/divisi");
+const { parsePagination, buildMeta } = require("../utils/pagination");
+
+const resolveJadwalSort = (sortBy, orderBy) => {
+    const allowedSort = [
+        "jdw_tgl_mulai",
+        "jdw_tgl_selesai",
+        "jdw_created_at",
+        "jdw_updated_at",
+        "jdw_judul",
+    ];
+    const sortField = allowedSort.includes(sortBy) ? sortBy : "jdw_tgl_mulai";
+    const sortOrder =
+        String(orderBy || "DESC").toUpperCase() === "ASC" ? "ASC" : "DESC";
+    return [[sortField, sortOrder]];
+};
 
 const serializeJadwal = (item) => {
     const plain = item.get({ plain: true });
@@ -35,6 +50,8 @@ const getAll = async (req, res, next) => {
     try {
         const { status, jenis, assigned_to, tgl, bulan, tahun, divisi } =
             req.query;
+        const { hasPagination, limit, offset } = parsePagination(req.query);
+        const order = resolveJadwalSort(req.query.sort, req.query.order);
         const where = {};
         if (status) where.jdw_status = status;
         if (jenis) where.jdw_jenis_id = jenis;
@@ -72,7 +89,7 @@ const getAll = async (req, res, next) => {
             });
         }
 
-        const data = await Jadwal.findAll({
+        const queryOptions = {
             where,
             attributes: {
                 include: [
@@ -113,9 +130,31 @@ const getAll = async (req, res, next) => {
                     attributes: ["user_id", "user_nama"],
                 },
             ],
-            order: [["jdw_tgl_mulai", "DESC"]],
+            order,
+        };
+
+        if (!hasPagination) {
+            const data = await Jadwal.findAll(queryOptions);
+            return response.ok(res, data.map(serializeJadwal));
+        }
+
+        const { count, rows } = await Jadwal.findAndCountAll({
+            ...queryOptions,
+            limit,
+            offset,
+            distinct: true,
+            col: "jdw_id",
         });
-        return response.ok(res, data.map(serializeJadwal));
+
+        return response.ok(res, {
+            items: rows.map(serializeJadwal),
+            meta: buildMeta({
+                total: count,
+                limit,
+                offset,
+                itemCount: rows.length,
+            }),
+        });
     } catch (err) {
         next(err);
     }
@@ -124,6 +163,8 @@ const getAll = async (req, res, next) => {
 const getByDivisi = async (req, res, next) => {
     try {
         const { status, jenis, tgl } = req.query;
+        const { hasPagination, limit, offset } = parsePagination(req.query);
+        const order = resolveJadwalSort(req.query.sort, req.query.order);
         const userDivisi = normalizeDivisi(req.user.user_divisi);
         const where = { jdw_divisi: userDivisi || req.user.user_divisi };
         if (status) where.jdw_status = status;
@@ -139,7 +180,7 @@ const getByDivisi = async (req, res, next) => {
             });
         }
 
-        const data = await Jadwal.findAll({
+        const queryOptions = {
             where,
             attributes: {
                 include: [
@@ -180,9 +221,31 @@ const getByDivisi = async (req, res, next) => {
                     attributes: ["user_id", "user_nama"],
                 },
             ],
-            order: [["jdw_tgl_mulai", "DESC"]],
+            order,
+        };
+
+        if (!hasPagination) {
+            const data = await Jadwal.findAll(queryOptions);
+            return response.ok(res, data.map(serializeJadwal));
+        }
+
+        const { count, rows } = await Jadwal.findAndCountAll({
+            ...queryOptions,
+            limit,
+            offset,
+            distinct: true,
+            col: "jdw_id",
         });
-        return response.ok(res, data.map(serializeJadwal));
+
+        return response.ok(res, {
+            items: rows.map(serializeJadwal),
+            meta: buildMeta({
+                total: count,
+                limit,
+                offset,
+                itemCount: rows.length,
+            }),
+        });
     } catch (err) {
         next(err);
     }

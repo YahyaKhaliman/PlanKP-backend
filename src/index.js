@@ -12,6 +12,7 @@ const userRoutes = require("./routes/user.route");
 const jadwalRoutes = require("./routes/jadwal.route");
 const realisasiRoutes = require("./routes/realisasi.route");
 const jenisRoutes = require("./routes/jenis.route");
+const systemRoutes = require("./routes/system.route");
 
 const app = express();
 
@@ -33,6 +34,7 @@ app.use("/api/master", userRoutes);
 app.use("/api/master", realisasiRoutes);
 app.use("/api/master", jadwalRoutes);
 app.use("/api/master", jenisRoutes);
+app.use("/api/master", systemRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

@@ -3,20 +3,42 @@ const {
     sequelize,
 } = require("../models");
 const response = require("../utils/response");
+const { parsePagination, buildMeta } = require("../utils/pagination");
 
 // GET /checklist-template?jenis=Sewing
 const getAll = async (req, res, next) => {
     try {
         const where = { ct_is_active: true };
         if (req.query.jenis) where.ct_jenis_id = req.query.jenis;
-        const data = await ChecklistTemplate.findAll({
+        const { hasPagination, limit, offset } = parsePagination(req.query);
+        const order = [
+            ["ct_jenis_id", "ASC"],
+            ["ct_urutan", "ASC"],
+        ];
+
+        if (!hasPagination) {
+            const data = await ChecklistTemplate.findAll({
+                where,
+                order,
+            });
+            return response.ok(res, data);
+        }
+
+        const { count, rows } = await ChecklistTemplate.findAndCountAll({
             where,
-            order: [
-                ["ct_jenis_id", "ASC"],
-                ["ct_urutan", "ASC"],
-            ],
+            order,
+            limit,
+            offset,
         });
-        return response.ok(res, data);
+        return response.ok(res, {
+            items: rows,
+            meta: buildMeta({
+                total: count,
+                limit,
+                offset,
+                itemCount: rows.length,
+            }),
+        });
     } catch (err) {
         next(err);
     }

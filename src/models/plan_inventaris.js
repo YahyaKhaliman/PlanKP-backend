@@ -26,8 +26,8 @@ module.exports = function (sequelize, DataTypes) {
                     key: "jenis_id",
                 },
             },
-            inv_lokasi: {
-                type: DataTypes.STRING(100),
+            inv_pabrik_kode: {
+                type: DataTypes.STRING(10),
                 allowNull: true,
             },
             inv_merk: {
@@ -98,6 +98,11 @@ module.exports = function (sequelize, DataTypes) {
                     name: "idx_inv_active",
                     using: "BTREE",
                     fields: [{ name: "inv_is_active" }],
+                },
+                {
+                    name: "idx_inv_pabrik",
+                    using: "BTREE",
+                    fields: [{ name: "inv_pabrik_kode" }],
                 },
             ],
         },

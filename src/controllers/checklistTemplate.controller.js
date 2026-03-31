@@ -1,5 +1,6 @@
 const {
     plan_checklist_template: ChecklistTemplate,
+    plan_jenis: Jenis,
     sequelize,
 } = require("../models");
 const response = require("../utils/response");
@@ -15,10 +16,20 @@ const getAll = async (req, res, next) => {
             ["ct_jenis_id", "ASC"],
             ["ct_urutan", "ASC"],
         ];
+        const include = [];
+        if (req.adminScope) {
+            include.push({
+                model: Jenis,
+                as: "ct_jenis",
+                attributes: [],
+                where: { jenis_kategori: req.adminScope },
+            });
+        }
 
         if (!hasPagination) {
             const data = await ChecklistTemplate.findAll({
                 where,
+                include,
                 order,
             });
             return response.ok(res, data);
@@ -26,6 +37,7 @@ const getAll = async (req, res, next) => {
 
         const { count, rows } = await ChecklistTemplate.findAndCountAll({
             where,
+            include,
             order,
             limit,
             offset,
@@ -54,6 +66,18 @@ const create = async (req, res, next) => {
                 "Jenis inventaris dan item wajib diisi",
                 400,
             );
+
+        if (req.adminScope) {
+            const jenis = await Jenis.findOne({
+                where: {
+                    jenis_id: ct_jenis_id,
+                    jenis_kategori: req.adminScope,
+                },
+            });
+            if (!jenis) {
+                return response.error(res, "Jenis di luar scope admin", 403);
+            }
+        }
 
         const data = await ChecklistTemplate.create({
             ct_jenis_id,
@@ -84,6 +108,20 @@ const bulkCreate = async (req, res, next) => {
                 "Jenis dan daftar item wajib diisi",
                 400,
             );
+
+        if (req.adminScope) {
+            const jenis = await Jenis.findOne({
+                where: {
+                    jenis_id: ct_jenis_id,
+                    jenis_kategori: req.adminScope,
+                },
+                transaction: t,
+            });
+            if (!jenis) {
+                await t.rollback();
+                return response.error(res, "Jenis di luar scope admin", 403);
+            }
+        }
 
         // Ambil urutan terakhir untuk jenis ini
         const lastItem = await ChecklistTemplate.findOne({

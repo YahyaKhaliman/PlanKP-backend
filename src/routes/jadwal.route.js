@@ -8,6 +8,7 @@ router.use(verifyToken);
 router.get("/jadwal/hari-ini", jadwal.hariIni);
 router.get("/jadwal", jadwal.getAll);
 router.get("/jadwal/divisi", jadwal.getByDivisi);
+router.get("/jadwal/assigned", jadwal.getByUser);
 router.get("/jadwal/:id", jadwal.getOne);
 router.post("/jadwal", allowOnly("admin"), jadwal.create);
 router.put("/jadwal/:id", allowOnly("admin"), jadwal.update);

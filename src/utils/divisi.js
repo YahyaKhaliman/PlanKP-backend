@@ -1,10 +1,4 @@
-const DIVISI_CANONICAL = [
-    "Teknisi Jahit",
-    "Teknisi Umum",
-    "IT Support",
-    "Satpam",
-    "Kebersihan",
-];
+const DIVISI_CANONICAL = ["GA", "IT", "Driver"];
 
 const toKey = (value) =>
     String(value || "")
@@ -13,11 +7,9 @@ const toKey = (value) =>
         .replace(/[^a-z0-9]/g, "");
 
 const DIVISI_ALIAS_MAP = {
-    teknisijahit: "Teknisi Jahit",
-    teknisiumum: "Teknisi Umum",
-    itsupport: "IT Support",
-    satpam: "Satpam",
-    kebersihan: "Kebersihan",
+    ga: "GA",
+    it: "IT",
+    driver: "Driver",
 };
 
 const normalizeDivisi = (value) => {

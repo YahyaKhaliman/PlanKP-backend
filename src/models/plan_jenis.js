@@ -15,12 +15,7 @@ module.exports = function (sequelize, DataTypes) {
                 unique: "uq_jenis_nama",
             },
             jenis_kategori: {
-                type: DataTypes.ENUM(
-                    "Mesin Jahit",
-                    "Mesin Umum",
-                    "Hardware",
-                    "APAR",
-                ),
+                type: DataTypes.STRING(50),
                 allowNull: false,
             },
             jenis_is_active: {

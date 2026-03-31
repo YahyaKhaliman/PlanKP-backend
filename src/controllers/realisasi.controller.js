@@ -20,7 +20,8 @@ const resolveRealisasiSort = (sortBy, orderBy) => {
         "real_status",
     ];
     const sortField = allowedSort.includes(sortBy) ? sortBy : "real_tgl";
-    const sortOrder = String(orderBy || "DESC").toUpperCase() === "ASC" ? "ASC" : "DESC";
+    const sortOrder =
+        String(orderBy || "DESC").toUpperCase() === "ASC" ? "ASC" : "DESC";
     return [[sortField, sortOrder]];
 };
 
@@ -64,7 +65,9 @@ const getAll = async (req, res, next) => {
 
         const useDivisiScope = String(by_divisi || "").toLowerCase() === "true";
         const isAdmin = req.user.user_jabatan === "admin";
-        if (useDivisiScope && !isAdmin) {
+        if (req.adminScope) {
+            includeJadwal.where = { jdw_divisi: req.adminScope };
+        } else if (useDivisiScope && !isAdmin) {
             const userDivisi =
                 normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
             includeJadwal.where = { jdw_divisi: userDivisi };
@@ -89,7 +92,7 @@ const getAll = async (req, res, next) => {
                         "inv_id",
                         "inv_no",
                         "inv_nama",
-                        "inv_lokasi",
+                        "inv_pabrik_kode",
                         "inv_pic",
                     ],
                 },
@@ -161,7 +164,7 @@ const getOne = async (req, res, next) => {
                 v.inv_nama,
                 v.inv_pic,
                 v.inv_kondisi_awal,
-                v.inv_lokasi,
+                v.inv_pabrik_kode,
                 v.teknisi_nama,
                 v.teknisi_divisi,
                 v.approver_nama
@@ -180,9 +183,11 @@ const getOne = async (req, res, next) => {
         if (!row) return response.error(res, "Realisasi tidak ditemukan", 404);
 
         const isAdmin = req.user.user_jabatan === "admin";
-        if (!isAdmin) {
+        if (req.adminScope || !isAdmin) {
             const userDivisi =
-                normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
+                req.adminScope ||
+                normalizeDivisi(req.user.user_divisi) ||
+                req.user.user_divisi;
             if (row.jdw_divisi && row.jdw_divisi !== userDivisi) {
                 return response.error(
                     res,
@@ -243,7 +248,7 @@ const getOne = async (req, res, next) => {
                 inv_nama: row.inv_nama,
                 inv_pic: row.inv_pic,
                 inv_kondisi_awal: row.inv_kondisi_awal,
-                inv_lokasi: row.inv_lokasi,
+                inv_pabrik_kode: row.inv_pabrik_kode,
             },
             teknisi: {
                 user_id: row.real_teknisi_id,

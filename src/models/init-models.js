@@ -6,6 +6,7 @@ var _plan_jadwal = require("./plan_jadwal");
 var _plan_realisasi = require("./plan_realisasi");
 var _plan_user = require("./plan_user");
 var _plan_jenis = require("./plan_jenis");
+var _tpabrik = require("./tpabrik");
 
 function initModels(sequelize) {
     var plan_checklist_template = _plan_checklist_template(
@@ -18,6 +19,7 @@ function initModels(sequelize) {
     var plan_realisasi = _plan_realisasi(sequelize, DataTypes);
     var plan_user = _plan_user(sequelize, DataTypes);
     var plan_jenis = _plan_jenis(sequelize, DataTypes);
+    var tpabrik = _tpabrik(sequelize, DataTypes);
 
     plan_hasil_checklist.belongsTo(plan_checklist_template, {
         as: "hc_ct",
@@ -75,14 +77,6 @@ function initModels(sequelize) {
         as: "plan_inventariss",
         foreignKey: "inv_jenis_id",
     });
-    plan_inventaris.belongsTo(plan_user, {
-        as: "pic_user",
-        foreignKey: "inv_pic",
-    });
-    plan_user.hasMany(plan_inventaris, {
-        as: "pic_user_plan_inventariss",
-        foreignKey: "inv_pic",
-    });
     plan_jadwal.belongsTo(plan_jenis, {
         as: "jdw_jenis",
         foreignKey: "jdw_jenis_id",
@@ -107,6 +101,14 @@ function initModels(sequelize) {
         as: "real_teknisi_plan_realisasis",
         foreignKey: "real_teknisi_id",
     });
+    plan_realisasi.belongsTo(plan_user, {
+        as: "real_approved_by_user",
+        foreignKey: "real_approved_by",
+    });
+    plan_user.hasMany(plan_realisasi, {
+        as: "real_approved_plan_realisasis",
+        foreignKey: "real_approved_by",
+    });
 
     return {
         plan_checklist_template,
@@ -116,6 +118,7 @@ function initModels(sequelize) {
         plan_realisasi,
         plan_user,
         plan_jenis,
+        tpabrik,
     };
 }
 module.exports = initModels;

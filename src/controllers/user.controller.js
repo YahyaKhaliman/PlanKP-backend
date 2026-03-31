@@ -5,25 +5,10 @@ const { normalizeDivisi } = require("../utils/divisi");
 
 const ALLOWED_JABATAN = ["admin", "user"];
 
-// Mapping inv_kategori → user_divisi
-const KATEGORI_DIVISI = {
-    "Mesin Jahit": ["Teknisi Jahit"],
-    "Mesin Umum": ["Teknisi Umum"],
-    Hardware: ["IT Support"],
-    APAR: ["Teknisi Jahit", "Teknisi Umum", "IT Support", "Satpam"],
-    Lainnya: [
-        "Teknisi Jahit",
-        "Teknisi Umum",
-        "IT Support",
-        "Satpam",
-        "Kebersihan",
-    ],
-};
-
-// GET /users?jabatan=&divisi=&q=&kategori=Hardware
+// GET /users?jabatan=&divisi=&q=
 const getAll = async (req, res, next) => {
     try {
-        const { jabatan, divisi, q, kategori } = req.query;
+        const { jabatan, divisi, q } = req.query;
         const where = { user_is_active: 1 };
         const isAdmin = req.user.user_jabatan === "admin";
 
@@ -46,12 +31,12 @@ const getAll = async (req, res, next) => {
             where.user_divisi = normalizedDivisi;
         }
 
-        // filter by kategori inventaris → otomatis resolve divisi
-        if (kategori && KATEGORI_DIVISI[kategori]) {
-            where.user_divisi = { [Op.in]: KATEGORI_DIVISI[kategori] };
-        }
-
         if (q) where.user_nama = { [Op.like]: `%${q}%` };
+
+        // admin hanya lihat user dalam scope divisinya
+        if (req.adminScope) {
+            where.user_divisi = req.adminScope;
+        }
 
         const data = await User.findAll({
             where,
@@ -77,13 +62,13 @@ const create = async (req, res, next) => {
             user_divisi,
             user_cabang,
         } = req.body;
-        const normalizedDivisi = normalizeDivisi(user_divisi);
+        const normalizedDivisi = req.adminScope || normalizeDivisi(user_divisi);
         if (
             !user_nama ||
             !user_nik ||
             !user_password ||
             !user_jabatan ||
-            !user_divisi
+            !(req.adminScope || user_divisi)
         )
             return response.error(
                 res,
@@ -128,7 +113,9 @@ const update = async (req, res, next) => {
             user_password,
         } = req.body;
         const normalizedDivisi =
-            user_divisi !== undefined ? normalizeDivisi(user_divisi) : null;
+            user_divisi !== undefined
+                ? req.adminScope || normalizeDivisi(user_divisi)
+                : null;
         if (user_divisi !== undefined && !normalizedDivisi)
             return response.error(res, "Divisi tidak valid", 400);
         if (
@@ -176,7 +163,4 @@ const toggleAktif = async (req, res, next) => {
     }
 };
 
-// GET /users/mapping-kategori — expose mapping untuk FE
-const getMappingKategori = (req, res) => response.ok(res, KATEGORI_DIVISI);
-
-module.exports = { getAll, create, update, toggleAktif, getMappingKategori };
+module.exports = { getAll, create, update, toggleAktif };

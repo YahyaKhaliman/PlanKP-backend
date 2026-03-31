@@ -4,23 +4,52 @@ const {
     plan_jadwal: Jadwal,
     plan_realisasi: Realisasi,
     plan_jenis: Jenis,
+    tpabrik: Pabrik,
 } = require("../models");
 const response = require("../utils/response");
 const { normalizeDivisi, DIVISI_CANONICAL } = require("../utils/divisi");
 
-const JENIS_KATEGORI = ["Mesin Jahit", "Mesin Umum", "Hardware", "APAR"];
+const JENIS_KATEGORI = DIVISI_CANONICAL;
 const JADWAL_FREKUENSI = ["Harian", "Mingguan", "Bulanan"];
-const JADWAL_STATUS = ["Aktif", "Nonaktif"];
+const JADWAL_STATUS = ["Draft", "Aktif", "Selesai", "Dibatalkan"];
 const REALISASI_STATUS = ["Draft", "Menunggu Approval", "Selesai", "Ditolak"];
 const KONDISI_LIST = ["Baik", "Perlu Perhatian", "Rusak"];
 
+const getPabrik = async (req, res, next) => {
+    try {
+        const data = await Pabrik.findAll({
+            attributes: ["pab_kode", "pab_nama", "pab_alamat", "pab_pabrik"],
+            order: [["pab_kode", "ASC"]],
+        });
+        return response.ok(res, data);
+    } catch (err) {
+        next(err);
+    }
+};
+
 const getMetadata = async (req, res, next) => {
     try {
-        const jenisList = await Jenis.findAll({
-            where: { jenis_is_active: 1 },
-            attributes: ["jenis_id", "jenis_nama", "jenis_kategori"],
-            order: [["jenis_nama", "ASC"]],
-        });
+        const jenisWhere = { jenis_is_active: 1 };
+        if (req.adminScope) {
+            jenisWhere.jenis_kategori = req.adminScope;
+        }
+
+        const [jenisList, pabrikList] = await Promise.all([
+            Jenis.findAll({
+                where: jenisWhere,
+                attributes: ["jenis_id", "jenis_nama", "jenis_kategori"],
+                order: [["jenis_nama", "ASC"]],
+            }),
+            Pabrik.findAll({
+                attributes: [
+                    "pab_kode",
+                    "pab_nama",
+                    "pab_alamat",
+                    "pab_pabrik",
+                ],
+                order: [["pab_kode", "ASC"]],
+            }),
+        ]);
 
         return response.ok(res, {
             divisi: DIVISI_CANONICAL,
@@ -30,6 +59,7 @@ const getMetadata = async (req, res, next) => {
             realisasi_status: REALISASI_STATUS,
             kondisi_inventaris: KONDISI_LIST,
             jenis: jenisList,
+            pabrik: pabrikList,
         });
     } catch (err) {
         next(err);
@@ -42,10 +72,13 @@ const getDashboardSummary = async (req, res, next) => {
         const userId = req.user.user_id;
         const userDivisi =
             normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
+        const scopeDivisi = req.adminScope || userDivisi;
         const today = new Date().toISOString().split("T")[0];
 
         const jadwalWhere = { jdw_status: "Aktif" };
-        if (!isAdmin) {
+        if (req.adminScope) {
+            jadwalWhere.jdw_divisi = scopeDivisi;
+        } else if (!isAdmin) {
             jadwalWhere[Op.or] = [
                 { jdw_divisi: userDivisi },
                 { jdw_assigned_to: userId },
@@ -62,13 +95,14 @@ const getDashboardSummary = async (req, res, next) => {
         const realisasiToday = await Realisasi.count({
             where: realisasiTodayWhere,
             include:
-                !isAdmin && !realisasiTodayWhere.real_teknisi_id
+                req.adminScope ||
+                (!isAdmin && !realisasiTodayWhere.real_teknisi_id)
                     ? [
                           {
                               model: Jadwal,
                               as: "real_jadwal",
                               attributes: [],
-                              where: { jdw_divisi: userDivisi },
+                              where: { jdw_divisi: scopeDivisi },
                           },
                       ]
                     : [],
@@ -76,21 +110,25 @@ const getDashboardSummary = async (req, res, next) => {
 
         const menungguApproval = await Realisasi.count({
             where: { real_status: "Menunggu Approval" },
-            include: !isAdmin
-                ? [
-                      {
-                          model: Jadwal,
-                          as: "real_jadwal",
-                          attributes: [],
-                          where: { jdw_divisi: userDivisi },
-                      },
-                  ]
-                : [],
+            include:
+                req.adminScope || !isAdmin
+                    ? [
+                          {
+                              model: Jadwal,
+                              as: "real_jadwal",
+                              attributes: [],
+                              where: { jdw_divisi: scopeDivisi },
+                          },
+                      ]
+                    : [],
         });
 
         const unitReplacements = {};
         let unitWhereSql = "";
-        if (!isAdmin) {
+        if (req.adminScope) {
+            unitWhereSql = " AND j.jdw_divisi = :scopeDivisi";
+            unitReplacements.scopeDivisi = scopeDivisi;
+        } else if (!isAdmin) {
             unitWhereSql =
                 " AND (j.jdw_divisi = :userDivisi OR j.jdw_assigned_to = :userId)";
             unitReplacements.userDivisi = userDivisi;
@@ -130,6 +168,7 @@ const getDashboardSummary = async (req, res, next) => {
 };
 
 module.exports = {
+    getPabrik,
     getMetadata,
     getDashboardSummary,
 };

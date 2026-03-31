@@ -4,6 +4,7 @@ const system = require("../controllers/system.controller");
 
 router.use(verifyToken);
 
+router.get("/pabrik", system.getPabrik);
 router.get("/metadata", system.getMetadata);
 router.get("/dashboard/summary", system.getDashboardSummary);
 

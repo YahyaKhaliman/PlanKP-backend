@@ -8,6 +8,10 @@ const getAll = async (req, res, next) => {
         if (kategori) where.jenis_kategori = kategori;
         if (aktif !== undefined)
             where.jenis_is_active = aktif === "true" ? 1 : 0;
+        // admin hanya lihat jenis dalam scope divisinya
+        if (req.adminScope) {
+            where.jenis_kategori = req.adminScope;
+        }
         const data = await Jenis.findAll({
             where,
             order: [["jenis_nama", "ASC"]],
@@ -20,7 +24,9 @@ const getAll = async (req, res, next) => {
 
 const create = async (req, res, next) => {
     try {
-        const { jenis_nama, jenis_kategori } = req.body;
+        const { jenis_nama } = req.body;
+        // kategori diambil dari scope user (admin scope) atau dari body (superadmin)
+        const jenis_kategori = req.adminScope || req.body.jenis_kategori;
         if (!jenis_nama || !jenis_kategori)
             return response.error(res, "Nama dan kategori wajib diisi", 400);
         const exists = await Jenis.findOne({ where: { jenis_nama } });
@@ -37,10 +43,16 @@ const update = async (req, res, next) => {
     try {
         const data = await Jenis.findByPk(req.params.id);
         if (!data) return response.error(res, "Jenis tidak ditemukan", 404);
+        if (req.adminScope && data.jenis_kategori !== req.adminScope) {
+            return response.error(res, "Jenis di luar scope admin", 403);
+        }
         const fields = ["jenis_nama", "jenis_kategori", "jenis_is_active"];
         fields.forEach((f) => {
             if (req.body[f] !== undefined) data[f] = req.body[f];
         });
+        if (req.adminScope) {
+            data.jenis_kategori = req.adminScope;
+        }
         await data.save();
         return response.ok(res, data, "Jenis berhasil diupdate");
     } catch (err) {

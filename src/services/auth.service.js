@@ -52,10 +52,13 @@ class AuthService {
             throw err;
         }
 
+        const { plan_user } = require("../models");
+        const hashedPassword = await plan_user.hashPassword(user_password);
+
         const created = await UserService.createUser({
             user_nama,
             user_nik: nik,
-            user_password,
+            user_password: hashedPassword,
             user_divisi: normalizedDivisi,
             user_jabatan: user_jabatan || "user",
             user_cabang,

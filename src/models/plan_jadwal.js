@@ -22,13 +22,7 @@ module.exports = function (sequelize, DataTypes) {
                 },
             },
             jdw_divisi: {
-                type: DataTypes.ENUM(
-                    "Teknisi Jahit",
-                    "Teknisi Umum",
-                    "IT Support",
-                    "Satpam",
-                    "Kebersihan",
-                ),
+                type: DataTypes.STRING(50),
                 allowNull: false,
             },
             jdw_frekuensi: {
@@ -63,10 +57,14 @@ module.exports = function (sequelize, DataTypes) {
                     key: "user_id",
                 },
             },
+            jdw_pabrik_kode: {
+                type: DataTypes.STRING(10),
+                allowNull: true,
+            },
             jdw_status: {
-                type: DataTypes.ENUM("Aktif", "Nonaktif"),
+                type: DataTypes.ENUM("Draft", "Aktif", "Selesai", "Dibatalkan"),
                 allowNull: false,
-                defaultValue: "Aktif",
+                defaultValue: "Draft",
             },
             jdw_notes: {
                 type: DataTypes.TEXT,
@@ -123,6 +121,11 @@ module.exports = function (sequelize, DataTypes) {
                     fields: [{ name: "jdw_assigned_to" }],
                 },
                 {
+                    name: "idx_jdw_pabrik",
+                    using: "BTREE",
+                    fields: [{ name: "jdw_pabrik_kode" }],
+                },
+                {
                     name: "idx_jdw_periode",
                     using: "BTREE",
                     fields: [
@@ -148,3 +151,4 @@ module.exports = function (sequelize, DataTypes) {
         },
     );
 };
+

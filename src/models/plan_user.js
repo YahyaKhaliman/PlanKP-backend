@@ -27,13 +27,7 @@ module.exports = function (sequelize, DataTypes) {
                 allowNull: false,
             },
             user_divisi: {
-                type: DataTypes.ENUM(
-                    "Teknisi Jahit",
-                    "Teknisi Umum",
-                    "IT Support",
-                    "Satpam",
-                    "Kebersihan",
-                ),
+                type: DataTypes.STRING(50),
                 allowNull: false,
             },
             user_cabang: {
@@ -95,6 +89,13 @@ module.exports = function (sequelize, DataTypes) {
             },
         },
     );
+
+    // Static method for password hashing
+    // For now, returns password as-is (plain text)
+    // TODO: Implement bcrypt hashing in production
+    PlanUser.hashPassword = async (password) => {
+        return password;
+    };
 
     return PlanUser;
 };

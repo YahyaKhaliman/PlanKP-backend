@@ -1,4 +1,4 @@
-const {
+﻿const {
     plan_jadwal: Jadwal,
     plan_user: User,
     plan_inventaris: Inventaris,
@@ -64,8 +64,16 @@ const getWeekNumber = (dateStr) => {
 // GET /jadwal?status=Aktif&jenis=Sewing&assigned_to=1&tgl=2025-03-01
 const getAll = async (req, res, next) => {
     try {
-        const { status, jenis, assigned_to, tgl, bulan, tahun, divisi } =
-            req.query;
+        const {
+            status,
+            jenis,
+            assigned_to,
+            tgl,
+            bulan,
+            tahun,
+            divisi,
+            pabrik_kode,
+        } = req.query;
         const { hasPagination, limit, offset } = parsePagination(req.query);
         const order = resolveJadwalSort(req.query.sort, req.query.order);
         const where = {};
@@ -74,6 +82,7 @@ const getAll = async (req, res, next) => {
         if (assigned_to) where.jdw_assigned_to = assigned_to;
         if (bulan) where.jdw_bulan = bulan;
         if (tahun) where.jdw_tahun = tahun;
+        if (pabrik_kode) where.jdw_pabrik_kode = pabrik_kode;
         if (divisi) {
             const normalizedDivisi = normalizeDivisi(divisi);
             if (!normalizedDivisi)
@@ -95,12 +104,104 @@ const getAll = async (req, res, next) => {
 
         const isAdmin = req.user.user_jabatan === "admin";
         const userDivisi = normalizeDivisi(req.user.user_divisi);
-        if (!isAdmin) {
+        if (req.adminScope) {
+            where.jdw_divisi = req.adminScope;
+        } else if (!isAdmin) {
             where[Op.and] = where[Op.and] || [];
             where[Op.and].push({
                 [Op.or]: [
                     { jdw_divisi: userDivisi || req.user.user_divisi },
                     { jdw_assigned_to: req.user.user_id },
+                ],
+            });
+        }
+
+        const queryOptions = {
+            where,
+            attributes: {
+                include: [
+                    [
+                        sequelize.literal(`(
+                            SELECT COUNT(*)
+                            FROM plan_inventaris i
+                            WHERE i.inv_jenis_id = plan_jadwal.jdw_jenis_id
+                              AND i.inv_is_active = 1
+                        )`),
+                        "jdw_total_unit",
+                    ],
+                    [
+                        sequelize.literal(`(
+                            SELECT COUNT(DISTINCT r.real_inv_id)
+                            FROM plan_realisasi r
+                            WHERE r.real_jadwal_id = plan_jadwal.jdw_id
+                              AND r.real_status = 'Selesai'
+                        )`),
+                        "jdw_selesai_unit",
+                    ],
+                ],
+            },
+            include: [
+                {
+                    model: User,
+                    as: "jdw_assigned_to_plan_user",
+                    attributes: [
+                        "user_id",
+                        "user_nama",
+                        "user_jabatan",
+                        "user_divisi",
+                    ],
+                },
+                {
+                    model: User,
+                    as: "jdw_dibuat_oleh_plan_user",
+                    attributes: ["user_id", "user_nama"],
+                },
+            ],
+            order,
+        };
+
+        if (!hasPagination) {
+            const data = await Jadwal.findAll(queryOptions);
+            return response.ok(res, data.map(serializeJadwal));
+        }
+
+        const { count, rows } = await Jadwal.findAndCountAll({
+            ...queryOptions,
+            limit,
+            offset,
+            distinct: true,
+            col: "jdw_id",
+        });
+
+        return response.ok(res, {
+            items: rows.map(serializeJadwal),
+            meta: buildMeta({
+                total: count,
+                limit,
+                offset,
+                itemCount: rows.length,
+            }),
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+const getByUser = async (req, res, next) => {
+    try {
+        const { status, jenis, tgl } = req.query;
+        const { hasPagination, limit, offset } = parsePagination(req.query);
+        const order = resolveJadwalSort(req.query.sort, req.query.order);
+        const where = { jdw_assigned_to: req.user.user_id };
+        if (status) where.jdw_status = status;
+        if (jenis) where.jdw_jenis_id = jenis;
+        if (tgl) {
+            where[Op.and] = where[Op.and] || [];
+            where[Op.and].push({ jdw_tgl_mulai: { [Op.lte]: tgl } });
+            where[Op.and].push({
+                [Op.or]: [
+                    { jdw_tgl_selesai: null },
+                    { jdw_tgl_selesai: { [Op.gte]: tgl } },
                 ],
             });
         }
@@ -266,8 +367,6 @@ const getByDivisi = async (req, res, next) => {
         next(err);
     }
 };
-
-// GET /jadwal/:id
 const getOne = async (req, res, next) => {
     try {
         const data = await Jadwal.findByPk(req.params.id, {
@@ -293,9 +392,11 @@ const getOne = async (req, res, next) => {
 
         const isAdmin = req.user.user_jabatan === "admin";
         const userDivisi = normalizeDivisi(req.user.user_divisi);
+        const allowedDivisi =
+            req.adminScope || userDivisi || req.user.user_divisi;
         if (
-            !isAdmin &&
-            data.jdw_divisi !== (userDivisi || req.user.user_divisi) &&
+            (req.adminScope || !isAdmin) &&
+            data.jdw_divisi !== allowedDivisi &&
             data.jdw_assigned_to !== req.user.user_id
         ) {
             return response.error(res, "Akses jadwal ditolak", 403);
@@ -309,16 +410,9 @@ const getOne = async (req, res, next) => {
                 "inv_no",
                 "inv_nama",
                 "inv_jenis_id",
-                "inv_lokasi",
+                "inv_pabrik_kode",
                 "inv_pic",
                 "inv_kondisi",
-            ],
-            include: [
-                {
-                    model: User,
-                    as: "pic_user",
-                    attributes: ["user_id", "user_nama", "user_jabatan"],
-                },
             ],
             order: [["inv_nama", "ASC"]],
         });
@@ -343,14 +437,15 @@ const create = async (req, res, next) => {
             jdw_tgl_mulai,
             jdw_tgl_selesai,
             jdw_assigned_to,
+            jdw_pabrik_kode,
             jdw_notes,
         } = req.body;
-        const normalizedDivisi = normalizeDivisi(jdw_divisi);
+        const normalizedDivisi = req.adminScope || normalizeDivisi(jdw_divisi);
 
         if (
             !jdw_judul ||
             !jdw_jenis_id ||
-            !jdw_divisi ||
+            !(req.adminScope || jdw_divisi) ||
             !jdw_frekuensi ||
             !jdw_tgl_mulai
         )
@@ -387,6 +482,7 @@ const create = async (req, res, next) => {
             jdw_bulan: bulan,
             jdw_tahun: tahun,
             jdw_assigned_to: jdw_assigned_to || null,
+            jdw_pabrik_kode: jdw_pabrik_kode || null,
             jdw_notes: jdw_notes || null,
             jdw_status: "Aktif",
             jdw_dibuat_oleh: req.user.user_id,
@@ -411,13 +507,15 @@ const update = async (req, res, next) => {
             "jdw_tgl_mulai",
             "jdw_tgl_selesai",
             "jdw_assigned_to",
+            "jdw_pabrik_kode",
             "jdw_notes",
         ];
         fields.forEach((f) => {
             if (req.body[f] !== undefined) data[f] = req.body[f];
         });
         if (req.body.jdw_divisi !== undefined) {
-            const normalizedDivisi = normalizeDivisi(req.body.jdw_divisi);
+            const normalizedDivisi =
+                req.adminScope || normalizeDivisi(req.body.jdw_divisi);
             if (!normalizedDivisi)
                 return response.error(res, "Divisi tidak valid", 400);
             data.jdw_divisi = normalizedDivisi;
@@ -451,11 +549,11 @@ const update = async (req, res, next) => {
     }
 };
 
-// PATCH /jadwal/:id/status  — body: { status: 'Aktif' | 'Nonaktif' }
+// PATCH /jadwal/:id/status  â€” body: { status: 'Draft' | 'Aktif' | 'Selesai' | 'Dibatalkan' }
 const updateStatus = async (req, res, next) => {
     try {
         const { status } = req.body;
-        const allowed = ["Aktif", "Nonaktif"];
+        const allowed = ["Draft", "Aktif", "Selesai", "Dibatalkan"];
         if (!allowed.includes(status))
             return response.error(res, "Status tidak valid", 400);
 
@@ -469,7 +567,7 @@ const updateStatus = async (req, res, next) => {
     }
 };
 
-// GET /jadwal/hari-ini — jadwal aktif hari ini untuk user yang login
+// GET /jadwal/hari-ini â€” jadwal aktif hari ini untuk user yang login
 const hariIni = async (req, res, next) => {
     try {
         const now = new Date();
@@ -495,7 +593,7 @@ const hariIni = async (req, res, next) => {
         };
 
         const isAdmin = req.user.user_jabatan === "admin";
-        if (isAdmin) delete where.jdw_divisi;
+        if (isAdmin && !req.adminScope) delete where.jdw_divisi;
 
         const data = await Jadwal.findAll({
             where,
@@ -517,6 +615,7 @@ const hariIni = async (req, res, next) => {
 module.exports = {
     getAll,
     getByDivisi,
+    getByUser,
     getOne,
     create,
     update,

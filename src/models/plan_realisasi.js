@@ -66,12 +66,7 @@ module.exports = function (sequelize, DataTypes) {
                 allowNull: true,
             },
             real_status: {
-                type: DataTypes.ENUM(
-                    "Draft",
-                    "Menunggu Approval",
-                    "Selesai",
-                    "Ditolak",
-                ),
+                type: DataTypes.ENUM("Draft", "Selesai"),
                 allowNull: false,
                 defaultValue: "Draft",
             },
@@ -134,6 +129,15 @@ module.exports = function (sequelize, DataTypes) {
                     name: "idx_real_inv",
                     using: "BTREE",
                     fields: [{ name: "real_inv_id" }],
+                },
+                {
+                    name: "uq_real_jadwal_inv",
+                    unique: true,
+                    using: "BTREE",
+                    fields: [
+                        { name: "real_jadwal_id" },
+                        { name: "real_inv_id" },
+                    ],
                 },
                 {
                     name: "idx_real_teknisi",

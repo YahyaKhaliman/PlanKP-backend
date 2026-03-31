@@ -49,6 +49,11 @@ module.exports = function (sequelize, DataTypes) {
                 type: DataTypes.SMALLINT.UNSIGNED,
                 allowNull: false,
             },
+            jdw_target: {
+                type: DataTypes.INTEGER,
+                allowNull: false,
+                defaultValue: 1,
+            },
             jdw_assigned_to: {
                 type: DataTypes.INTEGER,
                 allowNull: true,
@@ -151,4 +156,3 @@ module.exports = function (sequelize, DataTypes) {
         },
     );
 };
-

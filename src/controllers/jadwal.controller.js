@@ -1,4 +1,4 @@
-﻿const {
+const {
     plan_jadwal: Jadwal,
     plan_user: User,
     plan_inventaris: Inventaris,
@@ -61,6 +61,50 @@ const getWeekNumber = (dateStr) => {
     return Math.ceil((diff / 86400000 + startOfYear.getDay() + 1) / 7);
 };
 
+const isValidDateInput = (value) => {
+    if (!value) return false;
+    const d = new Date(value);
+    return !Number.isNaN(d.getTime());
+};
+
+const parsePositiveId = (value) => {
+    const n = Number(value);
+    return Number.isInteger(n) && n > 0 ? n : null;
+};
+
+const buildPeriodeWhere = ({
+    jenisId,
+    divisi,
+    frekuensi,
+    tglMulai,
+    bulan,
+    tahun,
+    weekNumber,
+    excludeJadwalId,
+}) => {
+    const where = {
+        jdw_jenis_id: Number(jenisId),
+        jdw_divisi: divisi,
+        jdw_frekuensi: frekuensi,
+    };
+
+    if (frekuensi === "Harian") {
+        where.jdw_tgl_mulai = tglMulai;
+    } else if (frekuensi === "Mingguan") {
+        where.jdw_tahun = tahun;
+        where.jdw_week_number = weekNumber;
+    } else if (frekuensi === "Bulanan") {
+        where.jdw_tahun = tahun;
+        where.jdw_bulan = bulan;
+    }
+
+    if (excludeJadwalId) {
+        where.jdw_id = { [Op.ne]: excludeJadwalId };
+    }
+
+    return where;
+};
+
 // GET /jadwal?status=Aktif&jenis=Sewing&assigned_to=1&tgl=2025-03-01
 const getAll = async (req, res, next) => {
     try {
@@ -77,6 +121,14 @@ const getAll = async (req, res, next) => {
         const { hasPagination, limit, offset } = parsePagination(req.query);
         const order = resolveJadwalSort(req.query.sort, req.query.order);
         const where = {};
+
+        if (tgl && !isValidDateInput(tgl)) {
+            return response.error(
+                res,
+                "Format tanggal filter tidak valid",
+                400,
+            );
+        }
         if (status) where.jdw_status = status;
         if (jenis) where.jdw_jenis_id = jenis;
         if (assigned_to) where.jdw_assigned_to = assigned_to;
@@ -138,6 +190,25 @@ const getAll = async (req, res, next) => {
                         )`),
                         "jdw_selesai_unit",
                     ],
+                    [
+                        sequelize.literal(`(
+                            COALESCE(
+                                ROUND(
+                                    (
+                                        (
+                                            SELECT COUNT(DISTINCT r.real_inv_id)
+                                            FROM plan_realisasi r
+                                            WHERE r.real_jadwal_id = plan_jadwal.jdw_id
+                                              AND r.real_status = 'Selesai'
+                                        ) / NULLIF(plan_jadwal.jdw_target, 0)
+                                    ) * 100,
+                                    2
+                                ),
+                                0
+                            )
+                        )`),
+                        "jdw_capaian_pct",
+                    ],
                 ],
             },
             include: [
@@ -162,7 +233,10 @@ const getAll = async (req, res, next) => {
 
         if (!hasPagination) {
             const data = await Jadwal.findAll(queryOptions);
-            return response.ok(res, data.map(serializeJadwal));
+            return response.okList(res, data.map(serializeJadwal), {
+                total: data.length,
+                itemCount: data.length,
+            });
         }
 
         const { count, rows } = await Jadwal.findAndCountAll({
@@ -173,15 +247,16 @@ const getAll = async (req, res, next) => {
             col: "jdw_id",
         });
 
-        return response.ok(res, {
-            items: rows.map(serializeJadwal),
-            meta: buildMeta({
+        return response.okList(
+            res,
+            rows.map(serializeJadwal),
+            buildMeta({
                 total: count,
                 limit,
                 offset,
                 itemCount: rows.length,
             }),
-        });
+        );
     } catch (err) {
         next(err);
     }
@@ -228,6 +303,25 @@ const getByUser = async (req, res, next) => {
                         )`),
                         "jdw_selesai_unit",
                     ],
+                    [
+                        sequelize.literal(`(
+                            COALESCE(
+                                ROUND(
+                                    (
+                                        (
+                                            SELECT COUNT(DISTINCT r.real_inv_id)
+                                            FROM plan_realisasi r
+                                            WHERE r.real_jadwal_id = plan_jadwal.jdw_id
+                                              AND r.real_status = 'Selesai'
+                                        ) / NULLIF(plan_jadwal.jdw_target, 0)
+                                    ) * 100,
+                                    2
+                                ),
+                                0
+                            )
+                        )`),
+                        "jdw_capaian_pct",
+                    ],
                 ],
             },
             include: [
@@ -252,7 +346,10 @@ const getByUser = async (req, res, next) => {
 
         if (!hasPagination) {
             const data = await Jadwal.findAll(queryOptions);
-            return response.ok(res, data.map(serializeJadwal));
+            return response.okList(res, data.map(serializeJadwal), {
+                total: data.length,
+                itemCount: data.length,
+            });
         }
 
         const { count, rows } = await Jadwal.findAndCountAll({
@@ -263,15 +360,16 @@ const getByUser = async (req, res, next) => {
             col: "jdw_id",
         });
 
-        return response.ok(res, {
-            items: rows.map(serializeJadwal),
-            meta: buildMeta({
+        return response.okList(
+            res,
+            rows.map(serializeJadwal),
+            buildMeta({
                 total: count,
                 limit,
                 offset,
                 itemCount: rows.length,
             }),
-        });
+        );
     } catch (err) {
         next(err);
     }
@@ -319,6 +417,25 @@ const getByDivisi = async (req, res, next) => {
                         )`),
                         "jdw_selesai_unit",
                     ],
+                    [
+                        sequelize.literal(`(
+                            COALESCE(
+                                ROUND(
+                                    (
+                                        (
+                                            SELECT COUNT(DISTINCT r.real_inv_id)
+                                            FROM plan_realisasi r
+                                            WHERE r.real_jadwal_id = plan_jadwal.jdw_id
+                                              AND r.real_status = 'Selesai'
+                                        ) / NULLIF(plan_jadwal.jdw_target, 0)
+                                    ) * 100,
+                                    2
+                                ),
+                                0
+                            )
+                        )`),
+                        "jdw_capaian_pct",
+                    ],
                 ],
             },
             include: [
@@ -343,7 +460,10 @@ const getByDivisi = async (req, res, next) => {
 
         if (!hasPagination) {
             const data = await Jadwal.findAll(queryOptions);
-            return response.ok(res, data.map(serializeJadwal));
+            return response.okList(res, data.map(serializeJadwal), {
+                total: data.length,
+                itemCount: data.length,
+            });
         }
 
         const { count, rows } = await Jadwal.findAndCountAll({
@@ -354,22 +474,26 @@ const getByDivisi = async (req, res, next) => {
             col: "jdw_id",
         });
 
-        return response.ok(res, {
-            items: rows.map(serializeJadwal),
-            meta: buildMeta({
+        return response.okList(
+            res,
+            rows.map(serializeJadwal),
+            buildMeta({
                 total: count,
                 limit,
                 offset,
                 itemCount: rows.length,
             }),
-        });
+        );
     } catch (err) {
         next(err);
     }
 };
 const getOne = async (req, res, next) => {
     try {
-        const data = await Jadwal.findByPk(req.params.id, {
+        const jadwalId = parsePositiveId(req.params.id);
+        if (!jadwalId) return response.error(res, "Id jadwal tidak valid", 400);
+
+        const data = await Jadwal.findByPk(jadwalId, {
             include: [
                 {
                     model: User,
@@ -436,6 +560,7 @@ const create = async (req, res, next) => {
             jdw_frekuensi,
             jdw_tgl_mulai,
             jdw_tgl_selesai,
+            jdw_target,
             jdw_assigned_to,
             jdw_pabrik_kode,
             jdw_notes,
@@ -456,6 +581,20 @@ const create = async (req, res, next) => {
             );
         if (!normalizedDivisi)
             return response.error(res, "Divisi tidak valid", 400);
+        if (!["Harian", "Mingguan", "Bulanan"].includes(jdw_frekuensi))
+            return response.error(res, "Frekuensi jadwal tidak valid", 400);
+        if (!isValidDateInput(jdw_tgl_mulai))
+            return response.error(res, "Tanggal mulai tidak valid", 400);
+        if (jdw_tgl_selesai && !isValidDateInput(jdw_tgl_selesai))
+            return response.error(res, "Tanggal selesai tidak valid", 400);
+
+        const parsedTarget = Number(jdw_target ?? 1);
+        if (!Number.isInteger(parsedTarget) || parsedTarget < 1)
+            return response.error(
+                res,
+                "Target jadwal wajib berupa angka bulat minimal 1",
+                400,
+            );
 
         const hasInventaris = await jenisHasActiveInventaris(jdw_jenis_id);
         if (!hasInventaris) {
@@ -471,6 +610,25 @@ const create = async (req, res, next) => {
         const tahun = tgl.getFullYear();
         const weekNo = getWeekNumber(jdw_tgl_mulai);
 
+        const duplicate = await Jadwal.findOne({
+            where: buildPeriodeWhere({
+                jenisId: jdw_jenis_id,
+                divisi: normalizedDivisi,
+                frekuensi: jdw_frekuensi,
+                tglMulai: jdw_tgl_mulai,
+                bulan,
+                tahun,
+                weekNumber: weekNo,
+            }),
+            attributes: ["jdw_id"],
+        });
+        if (duplicate)
+            return response.error(
+                res,
+                "Jadwal untuk jenis, divisi, dan periode tersebut sudah ada",
+                400,
+            );
+
         const data = await Jadwal.create({
             jdw_judul,
             jdw_jenis_id,
@@ -481,10 +639,11 @@ const create = async (req, res, next) => {
             jdw_week_number: weekNo,
             jdw_bulan: bulan,
             jdw_tahun: tahun,
+            jdw_target: parsedTarget,
             jdw_assigned_to: jdw_assigned_to || null,
             jdw_pabrik_kode: jdw_pabrik_kode || null,
             jdw_notes: jdw_notes || null,
-            jdw_status: "Aktif",
+            jdw_status: "Draft",
             jdw_dibuat_oleh: req.user.user_id,
         });
 
@@ -497,7 +656,10 @@ const create = async (req, res, next) => {
 // PUT /jadwal/:id
 const update = async (req, res, next) => {
     try {
-        const data = await Jadwal.findByPk(req.params.id);
+        const jadwalId = parsePositiveId(req.params.id);
+        if (!jadwalId) return response.error(res, "Id jadwal tidak valid", 400);
+
+        const data = await Jadwal.findByPk(jadwalId);
         if (!data) return response.error(res, "Jadwal tidak ditemukan", 404);
         const fields = [
             "jdw_judul",
@@ -506,6 +668,7 @@ const update = async (req, res, next) => {
             "jdw_divisi",
             "jdw_tgl_mulai",
             "jdw_tgl_selesai",
+            "jdw_target",
             "jdw_assigned_to",
             "jdw_pabrik_kode",
             "jdw_notes",
@@ -534,13 +697,57 @@ const update = async (req, res, next) => {
             }
         }
 
-        // recalculate periode jika tgl_mulai berubah
-        if (req.body.jdw_tgl_mulai) {
-            const tgl = new Date(req.body.jdw_tgl_mulai);
-            data.jdw_bulan = tgl.getMonth() + 1;
-            data.jdw_tahun = tgl.getFullYear();
-            data.jdw_week_number = getWeekNumber(req.body.jdw_tgl_mulai);
+        if (req.body.jdw_frekuensi !== undefined) {
+            const allowedFrekuensi = ["Harian", "Mingguan", "Bulanan"];
+            if (!allowedFrekuensi.includes(data.jdw_frekuensi)) {
+                return response.error(res, "Frekuensi jadwal tidak valid", 400);
+            }
         }
+
+        if (req.body.jdw_target !== undefined) {
+            const parsedTarget = Number(req.body.jdw_target);
+            if (!Number.isInteger(parsedTarget) || parsedTarget < 1) {
+                return response.error(
+                    res,
+                    "Target jadwal wajib berupa angka bulat minimal 1",
+                    400,
+                );
+            }
+            data.jdw_target = parsedTarget;
+        }
+
+        // recalculate periode berdasarkan tgl_mulai terbaru
+        if (!isValidDateInput(data.jdw_tgl_mulai)) {
+            return response.error(res, "Tanggal mulai tidak valid", 400);
+        }
+        if (data.jdw_tgl_selesai && !isValidDateInput(data.jdw_tgl_selesai)) {
+            return response.error(res, "Tanggal selesai tidak valid", 400);
+        }
+
+        const tgl = new Date(data.jdw_tgl_mulai);
+        data.jdw_bulan = tgl.getMonth() + 1;
+        data.jdw_tahun = tgl.getFullYear();
+        data.jdw_week_number = getWeekNumber(data.jdw_tgl_mulai);
+
+        const duplicate = await Jadwal.findOne({
+            where: buildPeriodeWhere({
+                jenisId: data.jdw_jenis_id,
+                divisi: data.jdw_divisi,
+                frekuensi: data.jdw_frekuensi,
+                tglMulai: data.jdw_tgl_mulai,
+                bulan: data.jdw_bulan,
+                tahun: data.jdw_tahun,
+                weekNumber: data.jdw_week_number,
+                excludeJadwalId: data.jdw_id,
+            }),
+            attributes: ["jdw_id"],
+        });
+        if (duplicate)
+            return response.error(
+                res,
+                "Jadwal untuk jenis, divisi, dan periode tersebut sudah ada",
+                400,
+            );
 
         await data.save();
         return response.ok(res, data, "Jadwal berhasil diupdate");
@@ -549,15 +756,18 @@ const update = async (req, res, next) => {
     }
 };
 
-// PATCH /jadwal/:id/status  â€” body: { status: 'Draft' | 'Aktif' | 'Selesai' | 'Dibatalkan' }
+// PATCH /jadwal/:id/status  — body: { status: 'Draft' | 'Selesai' }
 const updateStatus = async (req, res, next) => {
     try {
         const { status } = req.body;
-        const allowed = ["Draft", "Aktif", "Selesai", "Dibatalkan"];
+        const allowed = ["Draft", "Selesai"];
         if (!allowed.includes(status))
             return response.error(res, "Status tidak valid", 400);
 
-        const data = await Jadwal.findByPk(req.params.id);
+        const jadwalId = parsePositiveId(req.params.id);
+        if (!jadwalId) return response.error(res, "Id jadwal tidak valid", 400);
+
+        const data = await Jadwal.findByPk(jadwalId);
         if (!data) return response.error(res, "Jadwal tidak ditemukan", 404);
         data.jdw_status = status;
         await data.save();
@@ -567,7 +777,7 @@ const updateStatus = async (req, res, next) => {
     }
 };
 
-// GET /jadwal/hari-ini â€” jadwal aktif hari ini untuk user yang login
+// GET /jadwal/hari-ini — jadwal aktif hari ini untuk user yang login
 const hariIni = async (req, res, next) => {
     try {
         const now = new Date();
@@ -581,7 +791,7 @@ const hariIni = async (req, res, next) => {
             frekuensiHariIni.push({ jdw_frekuensi: "Bulanan" });
 
         const where = {
-            jdw_status: "Aktif",
+            jdw_status: "Draft",
             jdw_tgl_mulai: { [Op.lte]: today },
             [Op.or]: [
                 { jdw_tgl_selesai: null },
@@ -606,7 +816,10 @@ const hariIni = async (req, res, next) => {
             ],
             order: [["jdw_tgl_mulai", "ASC"]],
         });
-        return response.ok(res, data.map(serializeJadwal));
+        return response.okList(res, data.map(serializeJadwal), {
+            total: data.length,
+            itemCount: data.length,
+        });
     } catch (err) {
         next(err);
     }

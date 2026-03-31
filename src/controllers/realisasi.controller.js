@@ -7,7 +7,7 @@ const {
     plan_user: User,
     sequelize,
 } = require("../models");
-const { Op, QueryTypes } = require("sequelize");
+const { QueryTypes } = require("sequelize");
 const response = require("../utils/response");
 const { normalizeDivisi } = require("../utils/divisi");
 const { parsePagination, buildMeta } = require("../utils/pagination");
@@ -55,7 +55,17 @@ const getAll = async (req, res, next) => {
         const includeJadwal = {
             model: Jadwal,
             as: "real_jadwal",
-            attributes: ["jdw_id", "jdw_judul", "jdw_frekuensi", "jdw_divisi"],
+            attributes: [
+                "jdw_id",
+                "jdw_judul",
+                "jdw_frekuensi",
+                "jdw_divisi",
+                "jdw_status",
+                "jdw_target",
+                "jdw_week_number",
+                "jdw_bulan",
+                "jdw_tahun",
+            ],
         };
         if (jadwal_id) where.real_jadwal_id = jadwal_id;
         if (status) where.real_status = status;
@@ -295,14 +305,12 @@ const create = async (req, res, next) => {
             where: {
                 real_jadwal_id,
                 real_inv_id,
-                real_tgl,
-                real_status: { [Op.ne]: "Ditolak" },
             },
         });
         if (exists)
             return response.error(
                 res,
-                "Sudah ada realisasi untuk unit ini pada tanggal tersebut",
+                "Sudah ada realisasi untuk unit ini pada jadwal tersebut",
                 400,
             );
 
@@ -428,10 +436,40 @@ const getTemplate = async (req, res, next) => {
     }
 };
 
+// PUT /realisasi/:id — update field realisasi sebelum TTD (hanya saat Draft)
+const update = async (req, res, next) => {
+    try {
+        const real = await Realisasi.findByPk(req.params.id);
+        if (!real) return response.error(res, "Realisasi tidak ditemukan", 404);
+        if (real.real_status !== "Draft")
+            return response.error(
+                res,
+                "Hanya realisasi Draft yang bisa diubah",
+                400,
+            );
+
+        const fields = [
+            "real_jam_mulai",
+            "real_jam_selesai",
+            "real_kondisi_akhir",
+            "real_keterangan",
+        ];
+        fields.forEach((f) => {
+            if (req.body[f] !== undefined) real[f] = req.body[f];
+        });
+
+        await real.save();
+        return response.ok(res, real, "Realisasi berhasil diupdate");
+    } catch (err) {
+        next(err);
+    }
+};
+
 module.exports = {
     getAll,
     getOne,
     create,
+    update,
     saveChecklist,
     saveTtd,
     getTemplate,

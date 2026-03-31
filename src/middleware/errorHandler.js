@@ -1,20 +1,16 @@
 const response = require("../utils/response");
+const { mapSequelizeError } = require("../utils/db-error-mapper");
 
 const errorHandler = (err, req, res, next) => {
     console.error(`[ERROR] ${req.method} ${req.path}:`, err.message);
 
-    if (err.name === "SequelizeValidationError") {
-        const errors = err.errors.map((e) => e.message);
-        return response.error(res, "Validasi gagal", 422, errors);
-    }
-    if (err.name === "SequelizeUniqueConstraintError") {
-        return response.error(res, "Data sudah ada (duplikat)", 409);
-    }
-    if (err.name === "SequelizeForeignKeyConstraintError") {
+    const mappedDbError = mapSequelizeError(err);
+    if (mappedDbError) {
         return response.error(
             res,
-            "Data tidak bisa dihapus karena masih digunakan",
-            409,
+            mappedDbError.message,
+            mappedDbError.statusCode,
+            mappedDbError.errors,
         );
     }
 

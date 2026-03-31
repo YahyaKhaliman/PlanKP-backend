@@ -1,9 +1,34 @@
-const ok = (res, data = null, message = "Berhasil", statusCode = 200) => {
-    return res.status(statusCode).json({ success: true, message, data });
+const ok = (
+    res,
+    data = null,
+    message = "Berhasil",
+    statusCode = 200,
+    meta = null,
+) => {
+    const body = { success: true, message, data };
+    if (meta) body.meta = meta;
+    return res.status(statusCode).json(body);
 };
 
-const created = (res, data = null, message = "Data berhasil dibuat") => {
-    return res.status(201).json({ success: true, message, data });
+const okList = (res, items = [], meta = null, message = "Berhasil") => {
+    const payload = {
+        items: Array.isArray(items) ? items : [],
+    };
+    if (meta) {
+        payload.meta = meta;
+    }
+    return ok(res, payload, message);
+};
+
+const created = (
+    res,
+    data = null,
+    message = "Data berhasil dibuat",
+    meta = null,
+) => {
+    const body = { success: true, message, data };
+    if (meta) body.meta = meta;
+    return res.status(201).json(body);
 };
 
 const error = (
@@ -17,4 +42,4 @@ const error = (
     return res.status(statusCode).json(body);
 };
 
-module.exports = { ok, created, error };
+module.exports = { ok, okList, created, error };

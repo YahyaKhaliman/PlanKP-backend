@@ -11,8 +11,8 @@ const { normalizeDivisi, DIVISI_CANONICAL } = require("../utils/divisi");
 
 const JENIS_KATEGORI = DIVISI_CANONICAL;
 const JADWAL_FREKUENSI = ["Harian", "Mingguan", "Bulanan"];
-const JADWAL_STATUS = ["Draft", "Aktif", "Selesai", "Dibatalkan"];
-const REALISASI_STATUS = ["Draft", "Menunggu Approval", "Selesai", "Ditolak"];
+const JADWAL_STATUS = ["Draft", "Selesai"];
+const REALISASI_STATUS = ["Draft", "Selesai"];
 const KONDISI_LIST = ["Baik", "Perlu Perhatian", "Rusak"];
 
 const getPabrik = async (req, res, next) => {
@@ -75,7 +75,7 @@ const getDashboardSummary = async (req, res, next) => {
         const scopeDivisi = req.adminScope || userDivisi;
         const today = new Date().toISOString().split("T")[0];
 
-        const jadwalWhere = { jdw_status: "Aktif" };
+        const jadwalWhere = { jdw_status: "Selesai" };
         if (req.adminScope) {
             jadwalWhere.jdw_divisi = scopeDivisi;
         } else if (!isAdmin) {
@@ -85,7 +85,7 @@ const getDashboardSummary = async (req, res, next) => {
             ];
         }
 
-        const jadwalAktif = await Jadwal.count({ where: jadwalWhere });
+        const jadwalSelesai = await Jadwal.count({ where: jadwalWhere });
 
         const realisasiTodayWhere = { real_tgl: today };
         if (["teknisi", "it_support"].includes(req.user.user_jabatan)) {
@@ -108,8 +108,8 @@ const getDashboardSummary = async (req, res, next) => {
                     : [],
         });
 
-        const menungguApproval = await Realisasi.count({
-            where: { real_status: "Menunggu Approval" },
+        const realisasiDraft = await Realisasi.count({
+            where: { real_status: "Draft" },
             include:
                 req.adminScope || !isAdmin
                     ? [
@@ -140,7 +140,7 @@ const getDashboardSummary = async (req, res, next) => {
             FROM plan_inventaris i
             JOIN plan_jadwal j ON j.jdw_jenis_id = i.inv_jenis_id
             WHERE i.inv_is_active = 1
-              AND j.jdw_status = 'Aktif'
+              AND j.jdw_status = 'Selesai'
               ${unitWhereSql}
             `,
             {
@@ -155,9 +155,9 @@ const getDashboardSummary = async (req, res, next) => {
 
         return response.ok(res, {
             summary_cards: {
-                jadwal_aktif: jadwalAktif,
+                jadwal_selesai: jadwalSelesai,
                 realisasi_hari_ini: realisasiToday,
-                menunggu_approval: menungguApproval,
+                realisasi_draft: realisasiDraft,
                 total_unit_terjadwal: totalUnitTerjadwal,
             },
             generated_at: new Date().toISOString(),

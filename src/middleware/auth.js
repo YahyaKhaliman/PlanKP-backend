@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const response = require("../utils/response");
 const UserService = require("../services/user.service");
+const { normalizeDivisi } = require("../utils/divisi");
 
 const verifyToken = async (req, res, next) => {
     try {
@@ -18,6 +19,10 @@ const verifyToken = async (req, res, next) => {
                 401,
             );
         req.user = user;
+        if (user.user_jabatan === "admin") {
+            req.adminScope =
+                normalizeDivisi(user.user_divisi) || user.user_divisi || null;
+        }
         next();
     } catch (err) {
         if (err.name === "TokenExpiredError")

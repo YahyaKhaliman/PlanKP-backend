@@ -9,7 +9,7 @@ const ALLOWED_JABATAN = ["admin", "user"];
 const getAll = async (req, res, next) => {
     try {
         const { jabatan, divisi, q } = req.query;
-        const where = { user_is_active: 1 };
+        const where = { user_is_active: { [Op.or]: [1, 0] } };
         const isAdmin = req.user.user_jabatan === "admin";
 
         if (isAdmin) {
@@ -104,12 +104,17 @@ const update = async (req, res, next) => {
         const data = await User.scope("withPassword").findByPk(req.params.id);
         if (!data) return response.error(res, "User tidak ditemukan", 404);
 
+        if (req.adminScope && data.user_divisi !== req.adminScope) {
+            return response.error(res, "Akses user lintas divisi ditolak", 403);
+        }
+
         const {
             user_nama,
             user_nik,
             user_jabatan,
             user_divisi,
             user_cabang,
+            user_password_lama,
             user_password,
         } = req.body;
         const normalizedDivisi =
@@ -134,8 +139,19 @@ const update = async (req, res, next) => {
             if (exists) return response.error(res, "NIK sudah digunakan", 400);
             data.user_nik = user_nik;
         }
-        if (user_password)
+        if (user_password) {
+            if (!user_password_lama) {
+                return response.error(
+                    res,
+                    "Password lama wajib diisi untuk mengubah password",
+                    400,
+                );
+            }
+            if (data.user_password !== user_password_lama) {
+                return response.error(res, "Password lama salah", 400);
+            }
             data.user_password = await User.hashPassword(user_password);
+        }
 
         await data.save();
         const result = data.toJSON();
@@ -151,6 +167,9 @@ const toggleAktif = async (req, res, next) => {
     try {
         const data = await User.findByPk(req.params.id);
         if (!data) return response.error(res, "User tidak ditemukan", 404);
+        if (req.adminScope && data.user_divisi !== req.adminScope) {
+            return response.error(res, "Akses user lintas divisi ditolak", 403);
+        }
         data.user_is_active = data.user_is_active ? 0 : 1;
         await data.save();
         return response.ok(

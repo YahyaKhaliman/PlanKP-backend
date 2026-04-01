@@ -225,7 +225,9 @@ const getAll = async (req, res, next) => {
 
         const isAdmin = req.user.user_jabatan === "admin";
         const userDivisi = normalizeDivisi(req.user.user_divisi);
-        if (!isAdmin) {
+        if (req.adminScope) {
+            where.jdw_divisi = req.adminScope;
+        } else if (!isAdmin) {
             where[Op.and] = where[Op.and] || [];
             where[Op.and].push({
                 [Op.or]: [
@@ -472,14 +474,21 @@ const getOne = async (req, res, next) => {
 
         const isAdmin = req.user.user_jabatan === "admin";
         const userDivisi = normalizeDivisi(req.user.user_divisi);
-        const allowedDivisi =
-            req.adminScope || userDivisi || req.user.user_divisi;
-        if (
-            (req.adminScope || !isAdmin) &&
-            data.jdw_divisi !== allowedDivisi &&
-            data.jdw_assigned_to !== req.user.user_id
-        ) {
-            return response.error(res, "Akses jadwal ditolak", 403);
+        if (req.adminScope && data.jdw_divisi !== req.adminScope) {
+            return response.error(
+                res,
+                "Akses jadwal lintas divisi ditolak",
+                403,
+            );
+        }
+        if (!isAdmin) {
+            const allowedDivisi = userDivisi || req.user.user_divisi;
+            if (
+                data.jdw_divisi !== allowedDivisi &&
+                data.jdw_assigned_to !== req.user.user_id
+            ) {
+                return response.error(res, "Akses jadwal ditolak", 403);
+            }
         }
 
         // ambil inventaris dengan jenis yang sama
@@ -625,6 +634,13 @@ const update = async (req, res, next) => {
 
         const data = await Jadwal.findByPk(jadwalId);
         if (!data) return response.error(res, "Jadwal tidak ditemukan", 404);
+        if (req.adminScope && data.jdw_divisi !== req.adminScope) {
+            return response.error(
+                res,
+                "Akses jadwal lintas divisi ditolak",
+                403,
+            );
+        }
         const fields = [
             "jdw_judul",
             "jdw_jenis_id",
@@ -756,6 +772,13 @@ const updateStatus = async (req, res, next) => {
 
         const data = await Jadwal.findByPk(jadwalId);
         if (!data) return response.error(res, "Jadwal tidak ditemukan", 404);
+        if (req.adminScope && data.jdw_divisi !== req.adminScope) {
+            return response.error(
+                res,
+                "Akses jadwal lintas divisi ditolak",
+                403,
+            );
+        }
         data.jdw_status = status;
         await data.save();
         return response.ok(res, data, `Jadwal ${status.toLowerCase()}`);

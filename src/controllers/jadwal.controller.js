@@ -497,6 +497,7 @@ const getOne = async (req, res, next) => {
             attributes: [
                 "inv_id",
                 "inv_no",
+                "inv_merk",
                 "inv_nama",
                 "inv_jenis_id",
                 "inv_pabrik_kode",

@@ -9,6 +9,12 @@ const { Op } = require("sequelize");
 const response = require("../utils/response");
 const { normalizeDivisi } = require("../utils/divisi");
 const { parsePagination, buildMeta } = require("../utils/pagination");
+const {
+    getWeekNumber: getWeekNumberUtil,
+    getMonthNumber,
+    getYear,
+    calculateJadwalCountdown,
+} = require("../utils/date-helper");
 
 const resolveJadwalSort = (sortBy, orderBy) => {
     const allowedSort = [
@@ -28,6 +34,19 @@ const serializeJadwal = (item) => {
     const plain = item.get({ plain: true });
     plain.assigned_user = plain.jdw_assigned_to_plan_user || null;
     plain.dibuat_user = plain.jdw_dibuat_oleh_plan_user || null;
+
+    const countdown = calculateJadwalCountdown({
+        startDate: plain.jdw_tgl_mulai,
+        frekuensi: plain.jdw_frekuensi,
+        target: plain.jdw_target,
+        selesaiUnit: plain.jdw_selesai_unit,
+    });
+
+    plain.jdw_period_fulfilled = countdown.periodFulfilled;
+    plain.jdw_current_period_start = countdown.currentPeriodStart;
+    plain.jdw_next_due_date = countdown.nextDueDate;
+    plain.jdw_days_remaining = countdown.daysRemaining;
+
     return plain;
 };
 
@@ -40,7 +59,7 @@ const serializeInventaris = (item) => {
 const jenisHasActiveInventaris = async (jenisId) => {
     const normalizedJenisId = Number(jenisId);
     if (!Number.isInteger(normalizedJenisId) || normalizedJenisId <= 0) {
-        return false;
+        return 0;
     }
 
     const total = await Inventaris.count({
@@ -50,15 +69,65 @@ const jenisHasActiveInventaris = async (jenisId) => {
         },
     });
 
-    return total > 0;
+    return total;
 };
 
-// helper: hitung week_number dari tanggal
-const getWeekNumber = (dateStr) => {
-    const d = new Date(dateStr);
-    const startOfYear = new Date(d.getFullYear(), 0, 1);
-    const diff = d - startOfYear;
-    return Math.ceil((diff / 86400000 + startOfYear.getDay() + 1) / 7);
+// helper: hitung week_number, bulan, tahun dari tanggal (pakai utility untuk konsistensi)
+const calculateDateComponents = (dateStr) => {
+    return {
+        weekNumber: getWeekNumberUtil(new Date(dateStr)),
+        month: getMonthNumber(new Date(dateStr)),
+        year: getYear(new Date(dateStr)),
+    };
+};
+
+const buildCurrentPeriodDoneCountLiteral = () => `(
+    SELECT COUNT(DISTINCT r.real_inv_id)
+    FROM plan_realisasi r
+    WHERE r.real_jadwal_id = plan_jadwal.jdw_id
+      AND r.real_status = 'Selesai'
+      AND (
+        (plan_jadwal.jdw_frekuensi = 'Harian' AND r.real_tgl = CURDATE())
+        OR (
+            plan_jadwal.jdw_frekuensi = 'Mingguan'
+            AND r.real_tahun = YEAR(CURDATE())
+            AND r.real_week_number = WEEK(CURDATE(), 3)
+        )
+        OR (
+            plan_jadwal.jdw_frekuensi = 'Bulanan'
+            AND r.real_tahun = YEAR(CURDATE())
+            AND r.real_bulan = MONTH(CURDATE())
+        )
+      )
+)`;
+
+const buildComputedAttributes = () => {
+    const currentPeriodDoneCount = buildCurrentPeriodDoneCountLiteral();
+
+    return [
+        [
+            sequelize.literal(`(
+                SELECT COUNT(*)
+                FROM plan_inventaris i
+                WHERE i.inv_jenis_id = plan_jadwal.jdw_jenis_id
+                  AND i.inv_is_active = 1
+            )`),
+            "jdw_total_unit",
+        ],
+        [sequelize.literal(currentPeriodDoneCount), "jdw_selesai_unit"],
+        [
+            sequelize.literal(`(
+                COALESCE(
+                    ROUND(
+                        ((${currentPeriodDoneCount}) / NULLIF(plan_jadwal.jdw_target, 0)) * 100,
+                        2
+                    ),
+                    0
+                )
+            )`),
+            "jdw_capaian_pct",
+        ],
+    ];
 };
 
 const isValidDateInput = (value) => {
@@ -156,9 +225,7 @@ const getAll = async (req, res, next) => {
 
         const isAdmin = req.user.user_jabatan === "admin";
         const userDivisi = normalizeDivisi(req.user.user_divisi);
-        if (req.adminScope) {
-            where.jdw_divisi = req.adminScope;
-        } else if (!isAdmin) {
+        if (!isAdmin) {
             where[Op.and] = where[Op.and] || [];
             where[Op.and].push({
                 [Op.or]: [
@@ -171,45 +238,7 @@ const getAll = async (req, res, next) => {
         const queryOptions = {
             where,
             attributes: {
-                include: [
-                    [
-                        sequelize.literal(`(
-                            SELECT COUNT(*)
-                            FROM plan_inventaris i
-                            WHERE i.inv_jenis_id = plan_jadwal.jdw_jenis_id
-                              AND i.inv_is_active = 1
-                        )`),
-                        "jdw_total_unit",
-                    ],
-                    [
-                        sequelize.literal(`(
-                            SELECT COUNT(DISTINCT r.real_inv_id)
-                            FROM plan_realisasi r
-                            WHERE r.real_jadwal_id = plan_jadwal.jdw_id
-                              AND r.real_status = 'Selesai'
-                        )`),
-                        "jdw_selesai_unit",
-                    ],
-                    [
-                        sequelize.literal(`(
-                            COALESCE(
-                                ROUND(
-                                    (
-                                        (
-                                            SELECT COUNT(DISTINCT r.real_inv_id)
-                                            FROM plan_realisasi r
-                                            WHERE r.real_jadwal_id = plan_jadwal.jdw_id
-                                              AND r.real_status = 'Selesai'
-                                        ) / NULLIF(plan_jadwal.jdw_target, 0)
-                                    ) * 100,
-                                    2
-                                ),
-                                0
-                            )
-                        )`),
-                        "jdw_capaian_pct",
-                    ],
-                ],
+                include: buildComputedAttributes(),
             },
             include: [
                 {
@@ -284,45 +313,7 @@ const getByUser = async (req, res, next) => {
         const queryOptions = {
             where,
             attributes: {
-                include: [
-                    [
-                        sequelize.literal(`(
-                            SELECT COUNT(*)
-                            FROM plan_inventaris i
-                            WHERE i.inv_jenis_id = plan_jadwal.jdw_jenis_id
-                              AND i.inv_is_active = 1
-                        )`),
-                        "jdw_total_unit",
-                    ],
-                    [
-                        sequelize.literal(`(
-                            SELECT COUNT(DISTINCT r.real_inv_id)
-                            FROM plan_realisasi r
-                            WHERE r.real_jadwal_id = plan_jadwal.jdw_id
-                              AND r.real_status = 'Selesai'
-                        )`),
-                        "jdw_selesai_unit",
-                    ],
-                    [
-                        sequelize.literal(`(
-                            COALESCE(
-                                ROUND(
-                                    (
-                                        (
-                                            SELECT COUNT(DISTINCT r.real_inv_id)
-                                            FROM plan_realisasi r
-                                            WHERE r.real_jadwal_id = plan_jadwal.jdw_id
-                                              AND r.real_status = 'Selesai'
-                                        ) / NULLIF(plan_jadwal.jdw_target, 0)
-                                    ) * 100,
-                                    2
-                                ),
-                                0
-                            )
-                        )`),
-                        "jdw_capaian_pct",
-                    ],
-                ],
+                include: buildComputedAttributes(),
             },
             include: [
                 {
@@ -398,45 +389,7 @@ const getByDivisi = async (req, res, next) => {
         const queryOptions = {
             where,
             attributes: {
-                include: [
-                    [
-                        sequelize.literal(`(
-                            SELECT COUNT(*)
-                            FROM plan_inventaris i
-                            WHERE i.inv_jenis_id = plan_jadwal.jdw_jenis_id
-                              AND i.inv_is_active = 1
-                        )`),
-                        "jdw_total_unit",
-                    ],
-                    [
-                        sequelize.literal(`(
-                            SELECT COUNT(DISTINCT r.real_inv_id)
-                            FROM plan_realisasi r
-                            WHERE r.real_jadwal_id = plan_jadwal.jdw_id
-                              AND r.real_status = 'Selesai'
-                        )`),
-                        "jdw_selesai_unit",
-                    ],
-                    [
-                        sequelize.literal(`(
-                            COALESCE(
-                                ROUND(
-                                    (
-                                        (
-                                            SELECT COUNT(DISTINCT r.real_inv_id)
-                                            FROM plan_realisasi r
-                                            WHERE r.real_jadwal_id = plan_jadwal.jdw_id
-                                              AND r.real_status = 'Selesai'
-                                        ) / NULLIF(plan_jadwal.jdw_target, 0)
-                                    ) * 100,
-                                    2
-                                ),
-                                0
-                            )
-                        )`),
-                        "jdw_capaian_pct",
-                    ],
-                ],
+                include: buildComputedAttributes(),
             },
             include: [
                 {
@@ -494,6 +447,9 @@ const getOne = async (req, res, next) => {
         if (!jadwalId) return response.error(res, "Id jadwal tidak valid", 400);
 
         const data = await Jadwal.findByPk(jadwalId, {
+            attributes: {
+                include: buildComputedAttributes(),
+            },
             include: [
                 {
                     model: User,
@@ -596,19 +552,27 @@ const create = async (req, res, next) => {
                 400,
             );
 
-        const hasInventaris = await jenisHasActiveInventaris(jdw_jenis_id);
-        if (!hasInventaris) {
+        const totalInventaris = await jenisHasActiveInventaris(jdw_jenis_id);
+        if (totalInventaris === 0) {
             return response.error(
                 res,
                 "Jenis inventaris belum memiliki unit inventaris aktif",
                 400,
             );
         }
+        if (parsedTarget > totalInventaris) {
+            return response.error(
+                res,
+                `Target tidak boleh melebihi total inventaris jenis (max: ${totalInventaris})`,
+                400,
+            );
+        }
 
         const tgl = new Date(jdw_tgl_mulai);
-        const bulan = tgl.getMonth() + 1;
-        const tahun = tgl.getFullYear();
-        const weekNo = getWeekNumber(jdw_tgl_mulai);
+        const dateComp = calculateDateComponents(jdw_tgl_mulai);
+        const bulan = dateComp.month;
+        const tahun = dateComp.year;
+        const weekNo = dateComp.weekNumber;
 
         const duplicate = await Jadwal.findOne({
             where: buildPeriodeWhere({
@@ -685,13 +649,25 @@ const update = async (req, res, next) => {
         }
 
         if (req.body.jdw_jenis_id !== undefined) {
-            const hasInventaris = await jenisHasActiveInventaris(
+            const totalInventaris = await jenisHasActiveInventaris(
                 req.body.jdw_jenis_id,
             );
-            if (!hasInventaris) {
+            if (totalInventaris === 0) {
                 return response.error(
                     res,
                     "Jenis inventaris belum memiliki unit inventaris aktif",
+                    400,
+                );
+            }
+            // Jika target juga update, check target <= total inventaris
+            const targetToCheck =
+                req.body.jdw_target !== undefined
+                    ? Number(req.body.jdw_target)
+                    : data.jdw_target;
+            if (targetToCheck > totalInventaris) {
+                return response.error(
+                    res,
+                    `Target tidak boleh melebihi total inventaris jenis (max: ${totalInventaris})`,
                     400,
                 );
             }
@@ -713,6 +689,16 @@ const update = async (req, res, next) => {
                     400,
                 );
             }
+            const totalInventaris = await jenisHasActiveInventaris(
+                data.jdw_jenis_id,
+            );
+            if (parsedTarget > totalInventaris) {
+                return response.error(
+                    res,
+                    `Target tidak boleh melebihi total inventaris jenis (max: ${totalInventaris})`,
+                    400,
+                );
+            }
             data.jdw_target = parsedTarget;
         }
 
@@ -725,9 +711,10 @@ const update = async (req, res, next) => {
         }
 
         const tgl = new Date(data.jdw_tgl_mulai);
-        data.jdw_bulan = tgl.getMonth() + 1;
-        data.jdw_tahun = tgl.getFullYear();
-        data.jdw_week_number = getWeekNumber(data.jdw_tgl_mulai);
+        const dateComp = calculateDateComponents(data.jdw_tgl_mulai);
+        data.jdw_bulan = dateComp.month;
+        data.jdw_tahun = dateComp.year;
+        data.jdw_week_number = dateComp.weekNumber;
 
         const duplicate = await Jadwal.findOne({
             where: buildPeriodeWhere({
@@ -807,6 +794,9 @@ const hariIni = async (req, res, next) => {
 
         const data = await Jadwal.findAll({
             where,
+            attributes: {
+                include: buildComputedAttributes(),
+            },
             include: [
                 {
                     model: User,

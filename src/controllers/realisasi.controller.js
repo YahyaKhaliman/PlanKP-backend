@@ -11,6 +11,11 @@ const { QueryTypes } = require("sequelize");
 const response = require("../utils/response");
 const { normalizeDivisi } = require("../utils/divisi");
 const { parsePagination, buildMeta } = require("../utils/pagination");
+const {
+    getWeekNumber: getWeekNumberUtil,
+    getMonthNumber,
+    getYear,
+} = require("../utils/date-helper");
 
 const resolveRealisasiSort = (sortBy, orderBy) => {
     const allowedSort = [
@@ -296,10 +301,9 @@ const create = async (req, res, next) => {
             );
 
         const tgl = new Date(real_tgl);
-        const bulan = tgl.getMonth() + 1;
-        const tahun = tgl.getFullYear();
-        const weekNo =
-            Math.ceil((tgl - new Date(tahun, 0, 1)) / 86400000 / 7) + 1;
+        const bulan = getMonthNumber(tgl);
+        const tahun = getYear(tgl);
+        const weekNo = getWeekNumberUtil(tgl);
 
         const exists = await Realisasi.findOne({
             where: {

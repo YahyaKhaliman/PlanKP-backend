@@ -13,6 +13,7 @@ const jadwalRoutes = require("./routes/jadwal.route");
 const realisasiRoutes = require("./routes/realisasi.route");
 const jenisRoutes = require("./routes/jenis.route");
 const systemRoutes = require("./routes/system.route");
+const systemController = require("./controllers/system.controller");
 
 const app = express();
 
@@ -26,6 +27,9 @@ app.use(express.urlencoded({ extended: true }));
 app.get("/api/health", (req, res) =>
     res.json({ success: true, message: "PlanKP API running" }),
 );
+
+// Public endpoints (tidak perlu token)
+app.get("/api/master/pabrik", systemController.getPabrik);
 
 app.use("/api/auth", authRoutes);
 app.use("/api/master", checklistRoutes);

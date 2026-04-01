@@ -18,9 +18,6 @@ const verifyToken = async (req, res, next) => {
                 401,
             );
         req.user = user;
-        if (user.user_jabatan === "admin") {
-            req.adminScope = user.user_divisi;
-        }
         next();
     } catch (err) {
         if (err.name === "TokenExpiredError")

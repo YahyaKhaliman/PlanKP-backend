@@ -156,9 +156,19 @@ const calculateJadwalCountdown = ({
     const dueDate = periodFulfilled
         ? addByFrequency(periodAnchor, frekuensi, 1)
         : periodAnchor;
-    const daysRemaining = dueDate
+    let daysRemaining = dueDate
         ? Math.floor((dueDate - todayDate) / 86400000)
         : null;
+
+    // For ongoing weekly/monthly periods, keep status as "today" until target is fulfilled.
+    if (
+        !periodFulfilled &&
+        (frekuensi === "Mingguan" || frekuensi === "Bulanan") &&
+        daysRemaining != null &&
+        daysRemaining < 0
+    ) {
+        daysRemaining = 0;
+    }
 
     return {
         periodFulfilled,

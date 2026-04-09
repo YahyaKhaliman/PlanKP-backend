@@ -2,6 +2,7 @@ const {
     plan_jadwal: Jadwal,
     plan_user: User,
     plan_inventaris: Inventaris,
+    tpabrik: Pabrik,
     sequelize,
 } = require("../models");
 const UserService = require("../services/user.service");
@@ -30,6 +31,23 @@ const resolveJadwalSort = (sortBy, orderBy) => {
     return [[sortField, sortOrder]];
 };
 
+const splitPabrikCodes = (value) => {
+    if (!value) return [];
+    const raw = Array.isArray(value) ? value : String(value).split(/[;,]/);
+    const unique = new Set();
+    raw.forEach((code) => {
+        const cleaned = String(code).trim();
+        if (cleaned) unique.add(cleaned);
+    });
+    return Array.from(unique);
+};
+
+const hasPabrikOverlap = (existingCodes, incomingCodes) => {
+    const existingList = splitPabrikCodes(existingCodes);
+    if (!incomingCodes.length || !existingList.length) return true;
+    return existingList.some((code) => incomingCodes.includes(code));
+};
+
 const serializeJadwal = (item) => {
     const plain = item.get({ plain: true });
     plain.assigned_user = plain.jdw_assigned_to_plan_user || null;
@@ -46,6 +64,7 @@ const serializeJadwal = (item) => {
     plain.jdw_current_period_start = countdown.currentPeriodStart;
     plain.jdw_next_due_date = countdown.nextDueDate;
     plain.jdw_days_remaining = countdown.daysRemaining;
+    plain.jdw_pabrik_list = splitPabrikCodes(plain.jdw_pabrik_kode);
 
     return plain;
 };
@@ -174,6 +193,22 @@ const buildPeriodeWhere = ({
     return where;
 };
 
+const validatePabrikCodes = async (codes) => {
+    if (!codes.length) return [];
+    const rows = await Pabrik.findAll({
+        where: { pab_kode: { [Op.in]: codes } },
+        attributes: ["pab_kode"],
+    });
+    const known = new Set(rows.map((row) => row.pab_kode));
+    const invalid = codes.filter((code) => !known.has(code));
+    if (invalid.length) {
+        const err = new Error(`Kode pabrik tidak valid: ${invalid.join(", ")}`);
+        err.status = 400;
+        throw err;
+    }
+    return codes;
+};
+
 // GET /jadwal?status=Aktif&jenis=Sewing&assigned_to=1&tgl=2025-03-01
 const getAll = async (req, res, next) => {
     try {
@@ -203,7 +238,19 @@ const getAll = async (req, res, next) => {
         if (assigned_to) where.jdw_assigned_to = assigned_to;
         if (bulan) where.jdw_bulan = bulan;
         if (tahun) where.jdw_tahun = tahun;
-        if (pabrik_kode) where.jdw_pabrik_kode = pabrik_kode;
+        if (pabrik_kode) {
+            where[Op.and] = where[Op.and] || [];
+            where[Op.and].push(
+                sequelize.where(
+                    sequelize.fn(
+                        "FIND_IN_SET",
+                        pabrik_kode,
+                        sequelize.col("jdw_pabrik_kode"),
+                    ),
+                    { [Op.gt]: 0 },
+                ),
+            );
+        }
         if (divisi) {
             const normalizedDivisi = normalizeDivisi(divisi);
             if (!normalizedDivisi)
@@ -492,8 +539,18 @@ const getOne = async (req, res, next) => {
         }
 
         // ambil inventaris dengan jenis yang sama
+        const pabrikCodes = splitPabrikCodes(data.jdw_pabrik_kode);
+
+        const inventarisWhere = {
+            inv_jenis_id: data.jdw_jenis_id,
+            inv_is_active: 1,
+            ...(pabrikCodes.length > 0
+                ? { inv_pabrik_kode: { [Op.in]: pabrikCodes } }
+                : {}),
+        };
+
         const inventarisList = await Inventaris.findAll({
-            where: { inv_jenis_id: data.jdw_jenis_id, inv_is_active: 1 },
+            where: inventarisWhere,
             attributes: [
                 "inv_id",
                 "inv_no",
@@ -507,8 +564,10 @@ const getOne = async (req, res, next) => {
             order: [["inv_nama", "ASC"]],
         });
 
+        const jadwalPayload = serializeJadwal(data);
+
         return response.ok(res, {
-            jadwal: serializeJadwal(data),
+            jadwal: jadwalPayload,
             inventaris: inventarisList.map(serializeInventaris),
         });
     } catch (err) {
@@ -584,7 +643,10 @@ const create = async (req, res, next) => {
         const tahun = dateComp.year;
         const weekNo = dateComp.weekNumber;
 
-        const duplicate = await Jadwal.findOne({
+        const parsedPabrikCodes = splitPabrikCodes(jdw_pabrik_kode);
+        await validatePabrikCodes(parsedPabrikCodes);
+
+        const duplicateCandidates = await Jadwal.findAll({
             where: buildPeriodeWhere({
                 jenisId: jdw_jenis_id,
                 divisi: normalizedDivisi,
@@ -594,14 +656,20 @@ const create = async (req, res, next) => {
                 tahun,
                 weekNumber: weekNo,
             }),
-            attributes: ["jdw_id"],
+            attributes: ["jdw_id", "jdw_pabrik_kode"],
         });
-        if (duplicate)
+        const hasConflict = duplicateCandidates.some((row) =>
+            hasPabrikOverlap(row.jdw_pabrik_kode, parsedPabrikCodes),
+        );
+        if (hasConflict)
             return response.error(
                 res,
-                "Jadwal untuk jenis, divisi, dan periode tersebut sudah ada",
+                "Jadwal untuk kombinasi jenis, divisi, periode, dan pabrik tersebut sudah ada",
                 400,
             );
+        const pabrikString = parsedPabrikCodes.length
+            ? parsedPabrikCodes.join(",")
+            : null;
 
         const data = await Jadwal.create({
             jdw_judul,
@@ -615,7 +683,7 @@ const create = async (req, res, next) => {
             jdw_tahun: tahun,
             jdw_target: parsedTarget,
             jdw_assigned_to: jdw_assigned_to || null,
-            jdw_pabrik_kode: jdw_pabrik_kode || null,
+            jdw_pabrik_kode: pabrikString,
             jdw_notes: jdw_notes || null,
             jdw_status: "Draft",
             jdw_dibuat_oleh: req.user.user_id,
@@ -663,6 +731,16 @@ const update = async (req, res, next) => {
             if (!normalizedDivisi)
                 return response.error(res, "Divisi tidak valid", 400);
             data.jdw_divisi = normalizedDivisi;
+        }
+
+        if (req.body.jdw_pabrik_kode !== undefined) {
+            const parsedPabrikCodes = splitPabrikCodes(
+                req.body.jdw_pabrik_kode,
+            );
+            await validatePabrikCodes(parsedPabrikCodes);
+            data.jdw_pabrik_kode = parsedPabrikCodes.length
+                ? parsedPabrikCodes.join(",")
+                : null;
         }
 
         if (req.body.jdw_jenis_id !== undefined) {
@@ -733,7 +811,10 @@ const update = async (req, res, next) => {
         data.jdw_tahun = dateComp.year;
         data.jdw_week_number = dateComp.weekNumber;
 
-        const duplicate = await Jadwal.findOne({
+        const normalizedCurrentPabrikCodes = splitPabrikCodes(
+            data.jdw_pabrik_kode,
+        );
+        const duplicateCandidates = await Jadwal.findAll({
             where: buildPeriodeWhere({
                 jenisId: data.jdw_jenis_id,
                 divisi: data.jdw_divisi,
@@ -744,12 +825,15 @@ const update = async (req, res, next) => {
                 weekNumber: data.jdw_week_number,
                 excludeJadwalId: data.jdw_id,
             }),
-            attributes: ["jdw_id"],
+            attributes: ["jdw_id", "jdw_pabrik_kode"],
         });
-        if (duplicate)
+        const hasConflict = duplicateCandidates.some((row) =>
+            hasPabrikOverlap(row.jdw_pabrik_kode, normalizedCurrentPabrikCodes),
+        );
+        if (hasConflict)
             return response.error(
                 res,
-                "Jadwal untuk jenis, divisi, dan periode tersebut sudah ada",
+                "Jadwal untuk kombinasi jenis, divisi, periode, dan pabrik tersebut sudah ada",
                 400,
             );
 

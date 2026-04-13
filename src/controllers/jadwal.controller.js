@@ -271,9 +271,11 @@ const getAll = async (req, res, next) => {
         }
 
         const isAdmin = req.user.user_jabatan === "admin";
+        const isUserRole =
+            String(req.user.user_jabatan || "").toLowerCase() === "user";
         const userDivisi = normalizeDivisi(req.user.user_divisi);
-        if (req.adminScope) {
-            where.jdw_divisi = req.adminScope;
+        if (isUserRole) {
+            where.jdw_assigned_to = req.user.user_id;
         } else if (!isAdmin) {
             where[Op.and] = where[Op.and] || [];
             where[Op.and].push({
@@ -898,7 +900,7 @@ const hariIni = async (req, res, next) => {
         };
 
         const isAdmin = req.user.user_jabatan === "admin";
-        if (isAdmin && !req.adminScope) delete where.jdw_divisi;
+        if (isAdmin) delete where.jdw_divisi;
 
         const data = await Jadwal.findAll({
             where,

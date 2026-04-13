@@ -68,16 +68,20 @@ const getMetadata = async (req, res, next) => {
 
 const getDashboardSummary = async (req, res, next) => {
     try {
-        const isAdmin = req.user.user_jabatan === "admin";
+        const isAdmin =
+            String(req.user.user_jabatan || "").toLowerCase() === "admin";
         const userId = req.user.user_id;
         const userDivisi =
             normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
-        const scopeDivisi = req.adminScope || userDivisi;
+        const scopeDivisi = userDivisi;
         const today = new Date().toISOString().split("T")[0];
 
+        const userRole = (req.user.user_jabatan || "").toLowerCase();
+        const limitRealisasiBySelf = !isAdmin && userRole === "user";
+
         const jadwalWhere = { jdw_status: "Selesai" };
-        if (req.adminScope) {
-            jadwalWhere.jdw_divisi = scopeDivisi;
+        if (limitRealisasiBySelf) {
+            jadwalWhere.jdw_assigned_to = userId;
         } else if (!isAdmin) {
             jadwalWhere[Op.or] = [
                 { jdw_divisi: userDivisi },
@@ -90,13 +94,14 @@ const getDashboardSummary = async (req, res, next) => {
         const realisasiTodayWhere = { real_tgl: today };
         if (["teknisi", "it_support"].includes(req.user.user_jabatan)) {
             realisasiTodayWhere.real_teknisi_id = userId;
+        } else if (limitRealisasiBySelf) {
+            realisasiTodayWhere.real_teknisi_id = userId;
         }
 
         const realisasiToday = await Realisasi.count({
             where: realisasiTodayWhere,
             include:
-                req.adminScope ||
-                (!isAdmin && !realisasiTodayWhere.real_teknisi_id)
+                !isAdmin && !realisasiTodayWhere.real_teknisi_id
                     ? [
                           {
                               model: Jadwal,
@@ -108,10 +113,15 @@ const getDashboardSummary = async (req, res, next) => {
                     : [],
         });
 
+        const realisasiDraftWhere = { real_status: "Draft" };
+        if (limitRealisasiBySelf) {
+            realisasiDraftWhere.real_teknisi_id = userId;
+        }
+
         const realisasiDraft = await Realisasi.count({
-            where: { real_status: "Draft" },
+            where: realisasiDraftWhere,
             include:
-                req.adminScope || !isAdmin
+                !limitRealisasiBySelf && !isAdmin
                     ? [
                           {
                               model: Jadwal,
@@ -125,9 +135,9 @@ const getDashboardSummary = async (req, res, next) => {
 
         const unitReplacements = {};
         let unitWhereSql = "";
-        if (req.adminScope) {
-            unitWhereSql = " AND j.jdw_divisi = :scopeDivisi";
-            unitReplacements.scopeDivisi = scopeDivisi;
+        if (limitRealisasiBySelf) {
+            unitWhereSql = " AND j.jdw_assigned_to = :userId";
+            unitReplacements.userId = userId;
         } else if (!isAdmin) {
             unitWhereSql =
                 " AND (j.jdw_divisi = :userDivisi OR j.jdw_assigned_to = :userId)";

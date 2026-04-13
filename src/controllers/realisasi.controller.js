@@ -50,6 +50,14 @@ const describePeriod = (frekuensi, { date, weekNumber, month, year }) => {
     }
 };
 
+const isAdminUser = (req) =>
+    String(req.user?.user_jabatan || "").toLowerCase() === "admin";
+
+const isSelfOnlyRealisasiRole = (req) => {
+    const role = String(req.user?.user_jabatan || "").toLowerCase();
+    return ["user", "teknisi", "it_support"].includes(role);
+};
+
 const resolveRealisasiSort = (sortBy, orderBy) => {
     const allowedSort = [
         "real_tgl",
@@ -112,20 +120,17 @@ const getAll = async (req, res, next) => {
         if (teknisi_id) where.real_teknisi_id = teknisi_id;
 
         const useDivisiScope = String(by_divisi || "").toLowerCase() === "true";
-        const isAdmin = req.user.user_jabatan === "admin";
-        if (req.adminScope) {
-            includeJadwal.where = { jdw_divisi: req.adminScope };
-        } else if (useDivisiScope && !isAdmin) {
+        const isAdmin = isAdminUser(req);
+        const selfOnlyScope = !isAdmin && isSelfOnlyRealisasiRole(req);
+
+        if (useDivisiScope && !isAdmin && !selfOnlyScope) {
             const userDivisi =
                 normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
             includeJadwal.where = { jdw_divisi: userDivisi };
         }
 
-        // teknisi & it_support hanya lihat realisasi mereka sendiri
-        if (
-            ["teknisi", "it_support"].includes(req.user.user_jabatan) &&
-            !useDivisiScope
-        ) {
+        // Role user/teknisi/it_support selalu hanya boleh melihat realisasi miliknya.
+        if (selfOnlyScope) {
             where.real_teknisi_id = req.user.user_id;
         }
 
@@ -230,12 +235,19 @@ const getOne = async (req, res, next) => {
         const row = rows[0];
         if (!row) return response.error(res, "Realisasi tidak ditemukan", 404);
 
-        const isAdmin = req.user.user_jabatan === "admin";
-        if (req.adminScope || !isAdmin) {
+        const isAdmin = isAdminUser(req);
+        const selfOnlyScope = !isAdmin && isSelfOnlyRealisasiRole(req);
+        if (selfOnlyScope) {
+            if (Number(row.real_teknisi_id) !== Number(req.user.user_id)) {
+                return response.error(
+                    res,
+                    "Akses detail realisasi ditolak",
+                    403,
+                );
+            }
+        } else if (!isAdmin) {
             const userDivisi =
-                req.adminScope ||
-                normalizeDivisi(req.user.user_divisi) ||
-                req.user.user_divisi;
+                normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
             if (row.jdw_divisi && row.jdw_divisi !== userDivisi) {
                 return response.error(
                     res,
@@ -407,6 +419,17 @@ const saveChecklist = async (req, res, next) => {
             transaction: t,
         });
         if (!real) return response.error(res, "Realisasi tidak ditemukan", 404);
+        if (
+            !isAdminUser(req) &&
+            isSelfOnlyRealisasiRole(req) &&
+            Number(real.real_teknisi_id) !== Number(req.user.user_id)
+        ) {
+            return response.error(
+                res,
+                "Akses checklist realisasi ditolak",
+                403,
+            );
+        }
         if (real.real_status === "Selesai")
             return response.error(res, "Realisasi sudah selesai", 400);
 
@@ -451,6 +474,13 @@ const saveTtd = async (req, res, next) => {
             transaction: t,
         });
         if (!real) return response.error(res, "Realisasi tidak ditemukan", 404);
+        if (
+            !isAdminUser(req) &&
+            isSelfOnlyRealisasiRole(req) &&
+            Number(real.real_teknisi_id) !== Number(req.user.user_id)
+        ) {
+            return response.error(res, "Akses realisasi ditolak", 403);
+        }
         if (real.real_status === "Selesai")
             return response.error(res, "Realisasi sudah selesai", 400);
 
@@ -500,6 +530,13 @@ const update = async (req, res, next) => {
     try {
         const real = await Realisasi.findByPk(req.params.id);
         if (!real) return response.error(res, "Realisasi tidak ditemukan", 404);
+        if (
+            !isAdminUser(req) &&
+            isSelfOnlyRealisasiRole(req) &&
+            Number(real.real_teknisi_id) !== Number(req.user.user_id)
+        ) {
+            return response.error(res, "Akses update realisasi ditolak", 403);
+        }
         if (real.real_status !== "Draft")
             return response.error(
                 res,

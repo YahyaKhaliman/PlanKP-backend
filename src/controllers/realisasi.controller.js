@@ -18,22 +18,25 @@ const {
     formatDateOnly,
 } = require("../utils/date-helper");
 
-const buildPeriodFilter = (frekuensi, { date, weekNumber, month, year }) => {
+const isDuplicateByLatestPeriode = (frekuensi, latest, periodContext) => {
+    if (!latest) return false;
+
     switch (frekuensi) {
         case "Harian":
-            return { real_tgl: date };
+            return latest.real_tgl === periodContext.date;
         case "Mingguan":
-            return {
-                real_week_number: weekNumber,
-                real_tahun: year,
-            };
+            return (
+                Number(latest.real_tahun) === Number(periodContext.year) &&
+                Number(latest.real_week_number) ===
+                    Number(periodContext.weekNumber)
+            );
         case "Bulanan":
-            return {
-                real_bulan: month,
-                real_tahun: year,
-            };
+            return (
+                Number(latest.real_tahun) === Number(periodContext.year) &&
+                Number(latest.real_bulan) === Number(periodContext.month)
+            );
         default:
-            return { real_tgl: date };
+            return latest.real_tgl === periodContext.date;
     }
 };
 
@@ -56,6 +59,14 @@ const isAdminUser = (req) =>
 const isSelfOnlyRealisasiRole = (req) => {
     const role = String(req.user?.user_jabatan || "").toLowerCase();
     return ["user", "teknisi", "it_support"].includes(role);
+};
+
+const splitPabrikCodes = (value) => {
+    if (!value) return [];
+    const raw = Array.isArray(value) ? value : String(value).split(/[;,]/);
+    return raw
+        .map((code) => String(code).trim())
+        .filter((code) => code.length > 0);
 };
 
 const resolveRealisasiSort = (sortBy, orderBy) => {
@@ -352,14 +363,61 @@ const create = async (req, res, next) => {
 
         const jadwal = await Jadwal.findByPk(real_jadwal_id, {
             attributes: [
+                "jdw_id",
                 "jdw_frekuensi",
                 "jdw_week_number",
                 "jdw_bulan",
                 "jdw_tahun",
                 "jdw_tgl_mulai",
+                "jdw_jenis_id",
+                "jdw_pabrik_kode",
+                "jdw_status",
             ],
         });
         if (!jadwal) return response.error(res, "Jadwal tidak ditemukan", 404);
+
+        if (jadwal.jdw_status !== "Draft") {
+            return response.error(
+                res,
+                "Jadwal harus berstatus Draft untuk realisasi",
+                400,
+            );
+        }
+
+        const inventaris = await Inventaris.findOne({
+            where: {
+                inv_id: real_inv_id,
+                inv_is_active: 1,
+            },
+            attributes: ["inv_id", "inv_jenis_id", "inv_pabrik_kode"],
+        });
+        if (!inventaris) {
+            return response.error(
+                res,
+                "Inventaris tidak ditemukan atau tidak aktif",
+                404,
+            );
+        }
+
+        if (Number(inventaris.inv_jenis_id) !== Number(jadwal.jdw_jenis_id)) {
+            return response.error(
+                res,
+                "Inventaris tidak sesuai dengan jenis pada jadwal",
+                400,
+            );
+        }
+
+        const allowedPabrikCodes = splitPabrikCodes(jadwal.jdw_pabrik_kode);
+        if (
+            allowedPabrikCodes.length > 0 &&
+            !allowedPabrikCodes.includes(String(inventaris.inv_pabrik_kode))
+        ) {
+            return response.error(
+                res,
+                "Inventaris tidak termasuk pabrik/lokasi jadwal",
+                400,
+            );
+        }
 
         const periodContext = {
             date: real_tgl,
@@ -368,14 +426,27 @@ const create = async (req, res, next) => {
             year: tahun,
         };
 
-        const duplicateFilter = {
-            real_jadwal_id,
-            real_inv_id,
-            ...buildPeriodFilter(jadwal.jdw_frekuensi, periodContext),
-        };
+        const latestRealisasi = await Realisasi.findOne({
+            where: {
+                real_jadwal_id,
+                real_inv_id,
+            },
+            order: [
+                ["real_tahun", "DESC"],
+                ["real_bulan", "DESC"],
+                ["real_week_number", "DESC"],
+                ["real_tgl", "DESC"],
+                ["real_id", "DESC"],
+            ],
+        });
 
-        const exists = await Realisasi.findOne({ where: duplicateFilter });
-        if (exists)
+        if (
+            isDuplicateByLatestPeriode(
+                jadwal.jdw_frekuensi,
+                latestRealisasi,
+                periodContext,
+            )
+        )
             return response.error(
                 res,
                 `Inventaris sudah direalisasi pada ${describePeriod(

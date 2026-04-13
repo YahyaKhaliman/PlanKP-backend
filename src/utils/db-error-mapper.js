@@ -13,11 +13,14 @@ const mapSequelizeError = (err) => {
 
     if (err.name === "SequelizeUniqueConstraintError") {
         const indexName = err?.parent?.constraint || err?.original?.constraint;
-        if (indexName === "uq_real_jadwal_inv") {
+        if (
+            indexName === "uq_real_jadwal_inv_periode" ||
+            indexName === "uq_real_jadwal_inv"
+        ) {
             return {
                 statusCode: 409,
                 message:
-                    "Realisasi untuk inventaris ini pada jadwal yang sama sudah ada",
+                    "Realisasi untuk inventaris ini pada periode yang sama sudah ada",
             };
         }
 

@@ -4,7 +4,6 @@ const {
     plan_jadwal: Jadwal,
     plan_realisasi: Realisasi,
     plan_jenis: Jenis,
-    tpabrik: Pabrik,
 } = require("../models");
 const response = require("../utils/response");
 const { normalizeDivisi, DIVISI_CANONICAL } = require("../utils/divisi");
@@ -15,12 +14,20 @@ const JADWAL_STATUS = ["Draft", "Selesai"];
 const REALISASI_STATUS = ["Draft", "Selesai"];
 const KONDISI_LIST = ["Baik", "Perlu Perhatian", "Rusak"];
 
+const fetchPabrikList = async () => {
+    return sequelize.query(
+        `
+        SELECT pab_kode, pab_nama, pab_alamat, pab_pabrik
+        FROM kencanaprint.tpabrik
+        ORDER BY pab_kode ASC
+        `,
+        { type: QueryTypes.SELECT },
+    );
+};
+
 const getPabrik = async (req, res, next) => {
     try {
-        const data = await Pabrik.findAll({
-            attributes: ["pab_kode", "pab_nama", "pab_alamat", "pab_pabrik"],
-            order: [["pab_kode", "ASC"]],
-        });
+        const data = await fetchPabrikList();
         return response.ok(res, data);
     } catch (err) {
         next(err);
@@ -40,15 +47,7 @@ const getMetadata = async (req, res, next) => {
                 attributes: ["jenis_id", "jenis_nama", "jenis_kategori"],
                 order: [["jenis_nama", "ASC"]],
             }),
-            Pabrik.findAll({
-                attributes: [
-                    "pab_kode",
-                    "pab_nama",
-                    "pab_alamat",
-                    "pab_pabrik",
-                ],
-                order: [["pab_kode", "ASC"]],
-            }),
+            fetchPabrikList(),
         ]);
 
         return response.ok(res, {

@@ -2,11 +2,10 @@ const {
     plan_jadwal: Jadwal,
     plan_user: User,
     plan_inventaris: Inventaris,
-    tpabrik: Pabrik,
     sequelize,
 } = require("../models");
 const UserService = require("../services/user.service");
-const { Op } = require("sequelize");
+const { Op, QueryTypes } = require("sequelize");
 const response = require("../utils/response");
 const { normalizeDivisi } = require("../utils/divisi");
 const { parsePagination, buildMeta } = require("../utils/pagination");
@@ -195,10 +194,19 @@ const buildPeriodeWhere = ({
 
 const validatePabrikCodes = async (codes) => {
     if (!codes.length) return [];
-    const rows = await Pabrik.findAll({
-        where: { pab_kode: { [Op.in]: codes } },
-        attributes: ["pab_kode"],
-    });
+
+    const rows = await sequelize.query(
+        `
+        SELECT pab_kode
+        FROM kencanaprint.tpabrik
+        WHERE pab_kode IN (:codes)
+        `,
+        {
+            replacements: { codes },
+            type: QueryTypes.SELECT,
+        },
+    );
+
     const known = new Set(rows.map((row) => row.pab_kode));
     const invalid = codes.filter((code) => !known.has(code));
     if (invalid.length) {

@@ -50,7 +50,7 @@ sequelize
     .then(() => {
         console.log("Database terhubung.");
         app.listen(PORT, () =>
-            console.log(`PlanKP API berjalan di http://localhost:${PORT}`),
+            console.log(`PlanKP API berjalan di port:${PORT}`),
         );
     })
     .catch((err) => {

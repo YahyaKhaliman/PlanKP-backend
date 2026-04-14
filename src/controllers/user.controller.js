@@ -33,11 +33,6 @@ const getAll = async (req, res, next) => {
 
         if (q) where.user_nama = { [Op.like]: `%${q}%` };
 
-        // admin hanya lihat user dalam scope divisinya
-        if (req.adminScope) {
-            where.user_divisi = req.adminScope;
-        }
-
         const data = await User.findAll({
             where,
             order: [
@@ -62,13 +57,13 @@ const create = async (req, res, next) => {
             user_divisi,
             user_cabang,
         } = req.body;
-        const normalizedDivisi = req.adminScope || normalizeDivisi(user_divisi);
+        const normalizedDivisi = normalizeDivisi(user_divisi);
         if (
             !user_nama ||
             !user_nik ||
             !user_password ||
             !user_jabatan ||
-            !(req.adminScope || user_divisi)
+            !user_divisi
         )
             return response.error(
                 res,
@@ -104,10 +99,6 @@ const update = async (req, res, next) => {
         const data = await User.scope("withPassword").findByPk(req.params.id);
         if (!data) return response.error(res, "User tidak ditemukan", 404);
 
-        if (req.adminScope && data.user_divisi !== req.adminScope) {
-            return response.error(res, "Akses user lintas divisi ditolak", 403);
-        }
-
         const {
             user_nama,
             user_nik,
@@ -118,9 +109,7 @@ const update = async (req, res, next) => {
             user_password,
         } = req.body;
         const normalizedDivisi =
-            user_divisi !== undefined
-                ? req.adminScope || normalizeDivisi(user_divisi)
-                : null;
+            user_divisi !== undefined ? normalizeDivisi(user_divisi) : null;
         if (user_divisi !== undefined && !normalizedDivisi)
             return response.error(res, "Divisi tidak valid", 400);
         if (
@@ -167,9 +156,6 @@ const toggleAktif = async (req, res, next) => {
     try {
         const data = await User.findByPk(req.params.id);
         if (!data) return response.error(res, "User tidak ditemukan", 404);
-        if (req.adminScope && data.user_divisi !== req.adminScope) {
-            return response.error(res, "Akses user lintas divisi ditolak", 403);
-        }
         data.user_is_active = data.user_is_active ? 0 : 1;
         await data.save();
         return response.ok(

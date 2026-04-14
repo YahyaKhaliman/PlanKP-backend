@@ -5,7 +5,7 @@ const response = require("../utils/response");
 const getAll = async (req, res, next) => {
     try {
         const [rows] = await sequelize.query(
-            "SELECT pab_kode, pab_nama, pab_alamat FROM tpabrik ORDER BY pab_kode ASC",
+            "SELECT pab_kode, pab_nama, pab_alamat FROM kencanaprint.tpabrik ORDER BY pab_kode ASC",
         );
         return response.ok(res, rows);
     } catch (err) {

@@ -33,6 +33,11 @@ const getAll = async (req, res, next) => {
 
         if (q) where.user_nama = { [Op.like]: `%${q}%` };
 
+        // admin hanya lihat user dalam scope divisinya
+        if (req.adminScope) {
+            where.user_divisi = req.adminScope;
+        }
+
         const data = await User.findAll({
             where,
             order: [

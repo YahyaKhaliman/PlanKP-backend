@@ -31,7 +31,7 @@ module.exports = function (sequelize, DataTypes) {
         },
         {
             sequelize,
-            tableName: "tpabrik",
+            tableName: "kencanaprint.tpabrik",
             timestamps: false,
             indexes: [
                 {

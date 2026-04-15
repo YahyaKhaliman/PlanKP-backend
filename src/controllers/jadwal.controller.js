@@ -14,6 +14,7 @@ const {
     getMonthNumber,
     getYear,
     calculateJadwalCountdown,
+    formatDateOnly,
 } = require("../utils/date-helper");
 
 const resolveJadwalSort = (sortBy, orderBy) => {
@@ -886,7 +887,7 @@ const updateStatus = async (req, res, next) => {
 const hariIni = async (req, res, next) => {
     try {
         const now = new Date();
-        const today = now.toISOString().split("T")[0];
+        const today = formatDateOnly(now);
         const todayDay = now.getDay();
         const todayDate = now.getDate();
         const frekuensiHariIni = [{ jdw_frekuensi: "Harian" }];

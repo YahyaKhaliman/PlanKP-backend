@@ -133,10 +133,10 @@ const getAll = async (req, res, next) => {
         const useDivisiScope = String(by_divisi || "").toLowerCase() === "true";
         const isAdmin = isAdminUser(req);
         const selfOnlyScope = !isAdmin && isSelfOnlyRealisasiRole(req);
+        const userDivisi =
+            normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
 
         if (useDivisiScope && !isAdmin && !selfOnlyScope) {
-            const userDivisi =
-                normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
             includeJadwal.where = { jdw_divisi: userDivisi };
         }
 
@@ -164,6 +164,15 @@ const getAll = async (req, res, next) => {
                     model: User,
                     as: "real_teknisi",
                     attributes: ["user_id", "user_nama"],
+                    ...(isAdmin
+                        ? {
+                              // Admin hanya bisa melihat realisasi dari role user di divisi yang sama.
+                              where: {
+                                  user_divisi: userDivisi,
+                                  user_jabatan: "user",
+                              },
+                          }
+                        : {}),
                 },
             ],
             order,
@@ -248,6 +257,8 @@ const getOne = async (req, res, next) => {
 
         const isAdmin = isAdminUser(req);
         const selfOnlyScope = !isAdmin && isSelfOnlyRealisasiRole(req);
+        const userDivisi =
+            normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
         if (selfOnlyScope) {
             if (Number(row.real_teknisi_id) !== Number(req.user.user_id)) {
                 return response.error(
@@ -256,9 +267,33 @@ const getOne = async (req, res, next) => {
                     403,
                 );
             }
+        } else if (isAdmin) {
+            const teknisi = await User.findByPk(row.real_teknisi_id, {
+                attributes: ["user_id", "user_divisi", "user_jabatan"],
+            });
+            const teknisiDivisi = teknisi
+                ? normalizeDivisi(teknisi.user_divisi) || teknisi.user_divisi
+                : row.teknisi_divisi;
+            const teknisiJabatan = String(
+                teknisi?.user_jabatan || "",
+            ).toLowerCase();
+
+            if (teknisiJabatan !== "user") {
+                return response.error(
+                    res,
+                    "Akses detail realisasi ditolak",
+                    403,
+                );
+            }
+
+            if (teknisiDivisi && teknisiDivisi !== userDivisi) {
+                return response.error(
+                    res,
+                    "Akses detail realisasi ditolak",
+                    403,
+                );
+            }
         } else if (!isAdmin) {
-            const userDivisi =
-                normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
             if (row.jdw_divisi && row.jdw_divisi !== userDivisi) {
                 return response.error(
                     res,

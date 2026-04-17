@@ -160,6 +160,14 @@ const parsePositiveId = (value) => {
     return Number.isInteger(n) && n > 0 ? n : null;
 };
 
+const getUserDivisiScope = (req) =>
+    normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
+
+const buildAdminAssignedUserScope = (req) => ({
+    user_jabatan: "user",
+    user_divisi: getUserDivisiScope(req),
+});
+
 const buildPeriodeWhere = ({
     jenisId,
     divisi,
@@ -282,14 +290,14 @@ const getAll = async (req, res, next) => {
         const isAdmin = req.user.user_jabatan === "admin";
         const isUserRole =
             String(req.user.user_jabatan || "").toLowerCase() === "user";
-        const userDivisi = normalizeDivisi(req.user.user_divisi);
+        const userDivisi = getUserDivisiScope(req);
         if (isUserRole) {
             where.jdw_assigned_to = req.user.user_id;
         } else if (!isAdmin) {
             where[Op.and] = where[Op.and] || [];
             where[Op.and].push({
                 [Op.or]: [
-                    { jdw_divisi: userDivisi || req.user.user_divisi },
+                    { jdw_divisi: userDivisi },
                     { jdw_assigned_to: req.user.user_id },
                 ],
             });
@@ -310,6 +318,12 @@ const getAll = async (req, res, next) => {
                         "user_jabatan",
                         "user_divisi",
                     ],
+                    ...(isAdmin
+                        ? {
+                              where: buildAdminAssignedUserScope(req),
+                              required: true,
+                          }
+                        : {}),
                 },
                 {
                     model: User,
@@ -431,8 +445,9 @@ const getByDivisi = async (req, res, next) => {
         const { status, jenis, tgl } = req.query;
         const { hasPagination, limit, offset } = parsePagination(req.query);
         const order = resolveJadwalSort(req.query.sort, req.query.order);
-        const userDivisi = normalizeDivisi(req.user.user_divisi);
-        const where = { jdw_divisi: userDivisi || req.user.user_divisi };
+        const isAdmin = req.user.user_jabatan === "admin";
+        const userDivisi = getUserDivisiScope(req);
+        const where = { jdw_divisi: userDivisi };
         if (status) where.jdw_status = status;
         if (jenis) where.jdw_jenis_id = jenis;
         if (tgl) {
@@ -461,6 +476,12 @@ const getByDivisi = async (req, res, next) => {
                         "user_jabatan",
                         "user_divisi",
                     ],
+                    ...(isAdmin
+                        ? {
+                              where: buildAdminAssignedUserScope(req),
+                              required: true,
+                          }
+                        : {}),
                 },
                 {
                     model: User,
@@ -531,7 +552,8 @@ const getOne = async (req, res, next) => {
         if (!data) return response.error(res, "Jadwal tidak ditemukan", 404);
 
         const isAdmin = req.user.user_jabatan === "admin";
-        const userDivisi = normalizeDivisi(req.user.user_divisi);
+        const userDivisi = getUserDivisiScope(req);
+        const assignedUser = data.jdw_assigned_to_plan_user;
         if (req.adminScope && data.jdw_divisi !== req.adminScope) {
             return response.error(
                 res,
@@ -539,8 +561,23 @@ const getOne = async (req, res, next) => {
                 403,
             );
         }
+        if (isAdmin) {
+            const assignedRole = String(
+                assignedUser?.user_jabatan || "",
+            ).toLowerCase();
+            const assignedDivisi =
+                normalizeDivisi(assignedUser?.user_divisi) ||
+                assignedUser?.user_divisi;
+            if (
+                !assignedUser ||
+                assignedRole !== "user" ||
+                assignedDivisi !== userDivisi
+            ) {
+                return response.error(res, "Akses jadwal ditolak", 403);
+            }
+        }
         if (!isAdmin) {
-            const allowedDivisi = userDivisi || req.user.user_divisi;
+            const allowedDivisi = userDivisi;
             if (
                 data.jdw_divisi !== allowedDivisi &&
                 data.jdw_assigned_to !== req.user.user_id
@@ -904,12 +941,10 @@ const hariIni = async (req, res, next) => {
                 { jdw_tgl_selesai: { [Op.gte]: today } },
             ],
             [Op.and]: [{ [Op.or]: frekuensiHariIni }],
-            jdw_divisi:
-                normalizeDivisi(req.user.user_divisi) || req.user.user_divisi,
+            jdw_divisi: getUserDivisiScope(req),
         };
 
         const isAdmin = req.user.user_jabatan === "admin";
-        if (isAdmin) delete where.jdw_divisi;
 
         const data = await Jadwal.findAll({
             where,
@@ -921,6 +956,12 @@ const hariIni = async (req, res, next) => {
                     model: User,
                     as: "jdw_assigned_to_plan_user",
                     attributes: ["user_id", "user_nama", "user_jabatan"],
+                    ...(isAdmin
+                        ? {
+                              where: buildAdminAssignedUserScope(req),
+                              required: true,
+                          }
+                        : {}),
                 },
             ],
             order: [["jdw_tgl_mulai", "ASC"]],

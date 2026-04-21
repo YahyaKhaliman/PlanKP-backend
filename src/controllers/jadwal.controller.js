@@ -2,6 +2,7 @@ const {
     plan_jadwal: Jadwal,
     plan_user: User,
     plan_inventaris: Inventaris,
+    plan_jenis: Jenis,
     sequelize,
 } = require("../models");
 const UserService = require("../services/user.service");
@@ -91,6 +92,23 @@ const jenisHasActiveInventaris = async (jenisId) => {
     return total;
 };
 
+const findActiveJenis = async (jenisId, adminScope) => {
+    const normalizedJenisId = Number(jenisId);
+    if (!Number.isInteger(normalizedJenisId) || normalizedJenisId <= 0) {
+        return null;
+    }
+
+    const where = {
+        jenis_id: normalizedJenisId,
+        jenis_is_active: 1,
+    };
+    if (adminScope) {
+        where.jenis_kategori = adminScope;
+    }
+
+    return Jenis.findOne({ where });
+};
+
 // helper: hitung week_number, bulan, tahun dari tanggal (pakai utility untuk konsistensi)
 const calculateDateComponents = (dateStr) => {
     return {
@@ -167,6 +185,224 @@ const buildAdminAssignedUserScope = (req) => ({
     user_jabatan: "user",
     user_divisi: getUserDivisiScope(req),
 });
+
+const HARI_LIBUR_SCHEMA = "hrd2";
+const HARI_LIBUR_TABLE = "tharilibur";
+const HARI_LIBUR_DATE_COLUMN_CANDIDATES = [
+    "hl_tanggal",
+    "hlib_tanggal",
+    "harilibur_tanggal",
+    "tanggal",
+    "tgl",
+    "date",
+];
+const HARI_LIBUR_DESC_COLUMN_CANDIDATES = [
+    "hl_keterangan",
+    "hlib_keterangan",
+    "harilibur_keterangan",
+    "keterangan",
+    "ket",
+    "deskripsi",
+    "description",
+    "nama_libur",
+    "uraian",
+];
+
+let hariLiburDateColumnCache = null;
+let hariLiburDescColumnCache = null;
+
+const escapeIdentifier = (value) => {
+    return `\`${String(value).replace(/`/g, "``")}\``;
+};
+
+const resolveHariLiburDateColumn = async () => {
+    if (hariLiburDateColumnCache) return hariLiburDateColumnCache;
+
+    const columns = await sequelize.query(
+        `
+        SELECT COLUMN_NAME, DATA_TYPE
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = :schemaName
+          AND TABLE_NAME = :tableName
+        ORDER BY ORDINAL_POSITION ASC
+        `,
+        {
+            replacements: {
+                schemaName: HARI_LIBUR_SCHEMA,
+                tableName: HARI_LIBUR_TABLE,
+            },
+            type: QueryTypes.SELECT,
+        },
+    );
+
+    if (!columns.length) return null;
+
+    const byName = columns.find((col) =>
+        HARI_LIBUR_DATE_COLUMN_CANDIDATES.includes(
+            String(col.COLUMN_NAME || "").toLowerCase(),
+        ),
+    );
+    if (byName) {
+        hariLiburDateColumnCache = byName.COLUMN_NAME;
+        return hariLiburDateColumnCache;
+    }
+
+    const byType = columns.find((col) =>
+        ["date", "datetime", "timestamp"].includes(
+            String(col.DATA_TYPE || "").toLowerCase(),
+        ),
+    );
+    if (byType) {
+        hariLiburDateColumnCache = byType.COLUMN_NAME;
+        return hariLiburDateColumnCache;
+    }
+
+    return null;
+};
+
+const resolveHariLiburDescColumn = async () => {
+    if (hariLiburDescColumnCache !== null) return hariLiburDescColumnCache;
+
+    const columns = await sequelize.query(
+        `
+        SELECT COLUMN_NAME, DATA_TYPE
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = :schemaName
+          AND TABLE_NAME = :tableName
+        ORDER BY ORDINAL_POSITION ASC
+        `,
+        {
+            replacements: {
+                schemaName: HARI_LIBUR_SCHEMA,
+                tableName: HARI_LIBUR_TABLE,
+            },
+            type: QueryTypes.SELECT,
+        },
+    );
+
+    if (!columns.length) {
+        hariLiburDescColumnCache = null;
+        return null;
+    }
+
+    const byName = columns.find((col) =>
+        HARI_LIBUR_DESC_COLUMN_CANDIDATES.includes(
+            String(col.COLUMN_NAME || "").toLowerCase(),
+        ),
+    );
+    if (byName) {
+        hariLiburDescColumnCache = byName.COLUMN_NAME;
+        return hariLiburDescColumnCache;
+    }
+
+    const byType = columns.find((col) =>
+        ["varchar", "text", "char", "longtext", "mediumtext"].includes(
+            String(col.DATA_TYPE || "").toLowerCase(),
+        ),
+    );
+    hariLiburDescColumnCache = byType ? byType.COLUMN_NAME : null;
+    return hariLiburDescColumnCache;
+};
+
+const isTanggalHariLibur = async (dateString) => {
+    try {
+        const dateColumn = await resolveHariLiburDateColumn();
+        if (!dateColumn) return false;
+
+        const fullTableName = `${escapeIdentifier(HARI_LIBUR_SCHEMA)}.${escapeIdentifier(HARI_LIBUR_TABLE)}`;
+        const dateColumnName = escapeIdentifier(dateColumn);
+
+        const rows = await sequelize.query(
+            `
+            SELECT 1 AS is_holiday
+            FROM ${fullTableName}
+            WHERE DATE(${dateColumnName}) = :today
+            LIMIT 1
+            `,
+            {
+                replacements: { today: dateString },
+                type: QueryTypes.SELECT,
+            },
+        );
+
+        return rows.length > 0;
+    } catch (err) {
+        // Jangan blokir jadwal bila tabel libur tidak dapat diakses.
+        console.warn("Gagal membaca data hari libur:", err.message);
+        return false;
+    }
+};
+
+const getHariLibur = async (req, res, next) => {
+    try {
+        const now = new Date();
+        const year = Number(req.query.year || now.getFullYear());
+        const month = Number(req.query.month || now.getMonth() + 1);
+
+        if (!Number.isInteger(year) || year < 1900 || year > 3000) {
+            return response.error(res, "Parameter year tidak valid", 400);
+        }
+        if (!Number.isInteger(month) || month < 1 || month > 12) {
+            return response.error(res, "Parameter month tidak valid", 400);
+        }
+
+        const dateColumn = await resolveHariLiburDateColumn();
+        if (!dateColumn) {
+            return response.okList(res, [], {
+                total: 0,
+                itemCount: 0,
+            });
+        }
+
+        const descColumn = await resolveHariLiburDescColumn();
+        const fullTableName = `${escapeIdentifier(HARI_LIBUR_SCHEMA)}.${escapeIdentifier(HARI_LIBUR_TABLE)}`;
+        const dateColumnName = escapeIdentifier(dateColumn);
+        const descColumnSelect = descColumn
+            ? `${escapeIdentifier(descColumn)} AS keterangan`
+            : "NULL AS keterangan";
+
+        const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+        const monthEndDate = new Date(year, month, 0);
+        const monthEnd = `${monthEndDate.getFullYear()}-${String(monthEndDate.getMonth() + 1).padStart(2, "0")}-${String(monthEndDate.getDate()).padStart(2, "0")}`;
+
+        const rows = await sequelize.query(
+            `
+            SELECT
+                DATE_FORMAT(DATE(${dateColumnName}), '%Y-%m-%d') AS tanggal,
+                ${descColumnSelect}
+            FROM ${fullTableName}
+            WHERE DATE(${dateColumnName}) BETWEEN :monthStart AND :monthEnd
+            ORDER BY DATE(${dateColumnName}) ASC
+            `,
+            {
+                replacements: { monthStart, monthEnd },
+                type: QueryTypes.SELECT,
+            },
+        );
+
+        const unique = new Map();
+        rows.forEach((row) => {
+            const tanggal = String(row.tanggal || "");
+            if (!tanggal) return;
+            if (!unique.has(tanggal)) {
+                unique.set(tanggal, {
+                    tanggal,
+                    keterangan: row.keterangan || null,
+                });
+            }
+        });
+
+        const items = Array.from(unique.values());
+        return response.okList(res, items, {
+            total: items.length,
+            itemCount: items.length,
+            year,
+            month,
+        });
+    } catch (err) {
+        next(err);
+    }
+};
 
 const buildPeriodeWhere = ({
     jenisId,
@@ -669,6 +905,17 @@ const create = async (req, res, next) => {
                 400,
             );
 
+        const jenisData = await findActiveJenis(jdw_jenis_id, req.adminScope);
+        if (!jenisData) {
+            return response.error(
+                res,
+                req.adminScope
+                    ? "Jenis tidak aktif atau di luar scope admin"
+                    : "Jenis inventaris nonaktif atau tidak ditemukan",
+                req.adminScope ? 403 : 400,
+            );
+        }
+
         const totalInventaris = await jenisHasActiveInventaris(jdw_jenis_id);
         if (totalInventaris === 0) {
             return response.error(
@@ -789,6 +1036,24 @@ const update = async (req, res, next) => {
             data.jdw_pabrik_kode = parsedPabrikCodes.length
                 ? parsedPabrikCodes.join(",")
                 : null;
+        }
+
+        const effectiveJenisId =
+            req.body.jdw_jenis_id !== undefined
+                ? req.body.jdw_jenis_id
+                : data.jdw_jenis_id;
+        const effectiveJenis = await findActiveJenis(
+            effectiveJenisId,
+            req.adminScope,
+        );
+        if (!effectiveJenis) {
+            return response.error(
+                res,
+                req.adminScope
+                    ? "Jenis tidak aktif atau di luar scope admin"
+                    : "Jenis inventaris nonaktif atau tidak ditemukan",
+                req.adminScope ? 403 : 400,
+            );
         }
 
         if (req.body.jdw_jenis_id !== undefined) {
@@ -925,6 +1190,13 @@ const hariIni = async (req, res, next) => {
     try {
         const now = new Date();
         const today = formatDateOnly(now);
+        const isHariLibur = await isTanggalHariLibur(today);
+        if (isHariLibur) {
+            return response.okList(res, [], {
+                total: 0,
+                itemCount: 0,
+            });
+        }
         const todayDay = now.getDay();
         const todayDate = now.getDate();
         const frekuensiHariIni = [{ jdw_frekuensi: "Harian" }];
@@ -979,6 +1251,7 @@ module.exports = {
     getAll,
     getByDivisi,
     getByUser,
+    getHariLibur,
     getOne,
     create,
     update,

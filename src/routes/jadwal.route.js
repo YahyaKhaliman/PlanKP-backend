@@ -6,6 +6,7 @@ router.use(verifyToken);
 
 // ── Jadwal ─────────────────────────────────────────────────────
 router.get("/jadwal/hari-ini", jadwal.hariIni);
+router.get("/jadwal/hari-libur", jadwal.getHariLibur);
 router.get("/jadwal", jadwal.getAll);
 router.get("/jadwal/divisi", jadwal.getByDivisi);
 router.get("/jadwal/assigned", jadwal.getByUser);

@@ -6,6 +6,17 @@ const {
 const { Op } = require("sequelize");
 const response = require("../utils/response");
 
+const findActiveJenis = async (jenisId, adminScope) => {
+    const where = {
+        jenis_id: jenisId,
+        jenis_is_active: 1,
+    };
+    if (adminScope) {
+        where.jenis_kategori = adminScope;
+    }
+    return Jenis.findOne({ where });
+};
+
 // GET /inventaris
 const getAll = async (req, res, next) => {
     try {
@@ -106,16 +117,15 @@ const create = async (req, res, next) => {
         if (exists)
             return response.error(res, "No inventaris sudah digunakan", 400);
 
-        if (req.adminScope) {
-            const jenisData = await Jenis.findOne({
-                where: {
-                    jenis_id: inv_jenis_id,
-                    jenis_kategori: req.adminScope,
-                },
-            });
-            if (!jenisData) {
-                return response.error(res, "Jenis di luar scope admin", 403);
-            }
+        const jenisData = await findActiveJenis(inv_jenis_id, req.adminScope);
+        if (!jenisData) {
+            return response.error(
+                res,
+                req.adminScope
+                    ? "Jenis tidak aktif atau di luar scope admin"
+                    : "Jenis inventaris nonaktif atau tidak ditemukan",
+                req.adminScope ? 403 : 400,
+            );
         }
 
         const data = await Inventaris.create({
@@ -159,16 +169,22 @@ const update = async (req, res, next) => {
             if (req.body[f] !== undefined) data[f] = req.body[f];
         });
 
-        if (req.adminScope && req.body.inv_jenis_id !== undefined) {
-            const jenisData = await Jenis.findOne({
-                where: {
-                    jenis_id: req.body.inv_jenis_id,
-                    jenis_kategori: req.adminScope,
-                },
-            });
-            if (!jenisData) {
-                return response.error(res, "Jenis di luar scope admin", 403);
-            }
+        const effectiveJenisId =
+            req.body.inv_jenis_id !== undefined
+                ? req.body.inv_jenis_id
+                : data.inv_jenis_id;
+        const jenisData = await findActiveJenis(
+            effectiveJenisId,
+            req.adminScope,
+        );
+        if (!jenisData) {
+            return response.error(
+                res,
+                req.adminScope
+                    ? "Jenis tidak aktif atau di luar scope admin"
+                    : "Jenis inventaris nonaktif atau tidak ditemukan",
+                req.adminScope ? 403 : 400,
+            );
         }
 
         await data.save();

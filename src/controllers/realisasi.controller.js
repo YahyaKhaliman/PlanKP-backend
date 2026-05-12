@@ -15,43 +15,7 @@ const {
     getWeekNumber: getWeekNumberUtil,
     getMonthNumber,
     getYear,
-    formatDateOnly,
 } = require("../utils/date-helper");
-
-const isDuplicateByLatestPeriode = (frekuensi, latest, periodContext) => {
-    if (!latest) return false;
-
-    switch (frekuensi) {
-        case "Harian":
-            return latest.real_tgl === periodContext.date;
-        case "Mingguan":
-            return (
-                Number(latest.real_tahun) === Number(periodContext.year) &&
-                Number(latest.real_week_number) ===
-                    Number(periodContext.weekNumber)
-            );
-        case "Bulanan":
-            return (
-                Number(latest.real_tahun) === Number(periodContext.year) &&
-                Number(latest.real_bulan) === Number(periodContext.month)
-            );
-        default:
-            return latest.real_tgl === periodContext.date;
-    }
-};
-
-const describePeriod = (frekuensi, { date, weekNumber, month, year }) => {
-    switch (frekuensi) {
-        case "Harian":
-            return `tanggal ${formatDateOnly(date) ?? date}`;
-        case "Mingguan":
-            return `minggu ke-${weekNumber} tahun ${year}`;
-        case "Bulanan":
-            return `bulan ${month} tahun ${year}`;
-        default:
-            return `periode berjalan (${formatDateOnly(date) ?? date})`;
-    }
-};
 
 const isAdminUser = (req) =>
     String(req.user?.user_jabatan || "").toLowerCase() === "admin";
@@ -454,41 +418,19 @@ const create = async (req, res, next) => {
             );
         }
 
-        const periodContext = {
-            date: real_tgl,
-            weekNumber: weekNo,
-            month: bulan,
-            year: tahun,
-        };
-
-        const latestRealisasi = await Realisasi.findOne({
+        const existingRealisasi = await Realisasi.findOne({
             where: {
                 real_jadwal_id,
                 real_inv_id,
             },
-            order: [
-                ["real_tahun", "DESC"],
-                ["real_bulan", "DESC"],
-                ["real_week_number", "DESC"],
-                ["real_tgl", "DESC"],
-                ["real_id", "DESC"],
-            ],
+            attributes: ["real_id"],
         });
 
-        if (
-            isDuplicateByLatestPeriode(
-                jadwal.jdw_frekuensi,
-                latestRealisasi,
-                periodContext,
-            )
-        )
+        if (existingRealisasi)
             return response.error(
                 res,
-                `Inventaris sudah direalisasi pada ${describePeriod(
-                    jadwal.jdw_frekuensi,
-                    periodContext,
-                )}`,
-                400,
+                "Realisasi untuk jadwal dan inventaris ini sudah pernah dibuat",
+                409,
             );
 
         const data = await Realisasi.create({

@@ -57,10 +57,6 @@ module.exports = function (sequelize, DataTypes) {
                 type: DataTypes.SMALLINT.UNSIGNED,
                 allowNull: false,
             },
-            real_periode_key: {
-                type: DataTypes.STRING(20),
-                allowNull: false,
-            },
             real_kondisi_akhir: {
                 type: DataTypes.ENUM("Baik", "Perlu Perhatian", "Rusak"),
                 allowNull: true,
@@ -141,7 +137,7 @@ module.exports = function (sequelize, DataTypes) {
                     fields: [
                         { name: "real_jadwal_id" },
                         { name: "real_inv_id" },
-                        { name: "real_periode_key" },
+                        { name: "real_tgl" },
                     ],
                 },
                 {

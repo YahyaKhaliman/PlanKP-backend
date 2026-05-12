@@ -33,19 +33,6 @@ const splitPabrikCodes = (value) => {
         .filter((code) => code.length > 0);
 };
 
-const buildPeriodeKey = (frekuensi, { date, weekNumber, month, year }) => {
-    switch (frekuensi) {
-        case "Harian":
-            return String(date);
-        case "Mingguan":
-            return `${year}-W${String(weekNumber).padStart(2, "0")}`;
-        case "Bulanan":
-            return `${year}-${String(month).padStart(2, "0")}`;
-        default:
-            return String(date);
-    }
-};
-
 const resolveRealisasiSort = (sortBy, orderBy) => {
     const allowedSort = [
         "real_tgl",
@@ -474,30 +461,25 @@ const create = async (req, res, next) => {
             );
         }
 
-        const periodeKey = buildPeriodeKey(jadwal.jdw_frekuensi, {
-            date: real_tgl,
-            weekNumber: weekNo,
-            month: bulan,
-            year: tahun,
-        });
+        const duplicateWhere = {
+            real_jadwal_id,
+            real_inv_id,
+            real_tgl,
+        };
 
         const existingRealisasi = await Realisasi.findOne({
-            where: {
-                real_jadwal_id,
-                real_inv_id,
-                real_periode_key: periodeKey,
-            },
+            where: duplicateWhere,
             attributes: ["real_id"],
         });
 
         if (existingRealisasi)
             return response.error(
                 res,
-                "Realisasi untuk jadwal dan inventaris ini pada periode yang sama sudah ada",
+                "Realisasi untuk jadwal dan inventaris ini pada tanggal yang sama sudah ada",
                 409,
             );
 
-        const data = await Realisasi.create({
+        const payload = {
             real_jadwal_id,
             real_inv_id,
             real_teknisi_id: req.user.user_id,
@@ -507,11 +489,11 @@ const create = async (req, res, next) => {
             real_week_number: weekNo,
             real_bulan: bulan,
             real_tahun: tahun,
-            real_periode_key: periodeKey,
             real_kondisi_akhir,
             real_keterangan,
             real_status: "Draft",
-        });
+        };
+        const data = await Realisasi.create(payload);
 
         return response.created(res, data, "Realisasi berhasil dibuat");
     } catch (err) {

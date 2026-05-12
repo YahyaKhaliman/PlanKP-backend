@@ -1,0 +1,43 @@
+name: Backend Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-deploy-vps-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy and restart backend
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            # Path aplikasi backend dan nama PM2 dikendalikan via secrets agar tidak hardcoded.
+            cd "${{ secrets.VPS_BACKEND_PATH }}"
+            git fetch --all
+            git reset --hard origin/main
+            npm ci --omit=dev
+            pm2 restart "${{ secrets.PM2_APP_NAME }}"
+            pm2 status "${{ secrets.PM2_APP_NAME }}"
+
+      - name: Publish summary
+        run: |
+          echo "✓ Code pulled from GitHub" >> $GITHUB_STEP_SUMMARY
+          echo "✓ Dependencies installed (npm ci --omit=dev)" >> $GITHUB_STEP_SUMMARY
+          echo "✓ PM2 app restarted and status checked" >> $GITHUB_STEP_SUMMARY

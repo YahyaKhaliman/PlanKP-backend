@@ -33,6 +33,19 @@ const splitPabrikCodes = (value) => {
         .filter((code) => code.length > 0);
 };
 
+const buildPeriodeKey = (frekuensi, { date, weekNumber, month, year }) => {
+    switch (frekuensi) {
+        case "Harian":
+            return String(date);
+        case "Mingguan":
+            return `${year}-W${String(weekNumber).padStart(2, "0")}`;
+        case "Bulanan":
+            return `${year}-${String(month).padStart(2, "0")}`;
+        default:
+            return String(date);
+    }
+};
+
 const resolveRealisasiSort = (sortBy, orderBy) => {
     const allowedSort = [
         "real_tgl",
@@ -356,6 +369,13 @@ const create = async (req, res, next) => {
             );
 
         const tgl = new Date(real_tgl);
+        if (Number.isNaN(tgl.getTime())) {
+            return response.error(
+                res,
+                "Format tanggal realisasi tidak valid",
+                400,
+            );
+        }
         const bulan = getMonthNumber(tgl);
         const tahun = getYear(tgl);
         const weekNo = getWeekNumberUtil(tgl);
@@ -368,6 +388,7 @@ const create = async (req, res, next) => {
                 "jdw_bulan",
                 "jdw_tahun",
                 "jdw_tgl_mulai",
+                "jdw_tgl_selesai",
                 "jdw_jenis_id",
                 "jdw_pabrik_kode",
                 "jdw_status",
@@ -375,10 +396,45 @@ const create = async (req, res, next) => {
         });
         if (!jadwal) return response.error(res, "Jadwal tidak ditemukan", 404);
 
-        if (jadwal.jdw_status !== "Draft") {
+        if (!["Draft", "Aktif"].includes(jadwal.jdw_status)) {
             return response.error(
                 res,
-                "Jadwal harus berstatus Draft untuk realisasi",
+                "Jadwal harus berstatus Draft/Aktif untuk realisasi",
+                400,
+            );
+        }
+
+        const realDate = new Date(real_tgl);
+        const startDate = new Date(jadwal.jdw_tgl_mulai);
+        const endDate = jadwal.jdw_tgl_selesai
+            ? new Date(jadwal.jdw_tgl_selesai)
+            : null;
+        if (
+            Number.isNaN(startDate.getTime()) ||
+            (endDate && Number.isNaN(endDate.getTime()))
+        ) {
+            return response.error(
+                res,
+                "Periode jadwal tidak valid, hubungi admin",
+                400,
+            );
+        }
+
+        realDate.setHours(0, 0, 0, 0);
+        startDate.setHours(0, 0, 0, 0);
+        if (endDate) endDate.setHours(0, 0, 0, 0);
+
+        if (realDate < startDate) {
+            return response.error(
+                res,
+                "Tanggal realisasi belum masuk periode jadwal",
+                400,
+            );
+        }
+        if (endDate && realDate > endDate) {
+            return response.error(
+                res,
+                "Tanggal realisasi melewati tanggal selesai jadwal",
                 400,
             );
         }
@@ -418,10 +474,18 @@ const create = async (req, res, next) => {
             );
         }
 
+        const periodeKey = buildPeriodeKey(jadwal.jdw_frekuensi, {
+            date: real_tgl,
+            weekNumber: weekNo,
+            month: bulan,
+            year: tahun,
+        });
+
         const existingRealisasi = await Realisasi.findOne({
             where: {
                 real_jadwal_id,
                 real_inv_id,
+                real_periode_key: periodeKey,
             },
             attributes: ["real_id"],
         });
@@ -429,7 +493,7 @@ const create = async (req, res, next) => {
         if (existingRealisasi)
             return response.error(
                 res,
-                "Realisasi untuk jadwal dan inventaris ini sudah pernah dibuat",
+                "Realisasi untuk jadwal dan inventaris ini pada periode yang sama sudah ada",
                 409,
             );
 
@@ -443,6 +507,7 @@ const create = async (req, res, next) => {
             real_week_number: weekNo,
             real_bulan: bulan,
             real_tahun: tahun,
+            real_periode_key: periodeKey,
             real_kondisi_akhir,
             real_keterangan,
             real_status: "Draft",

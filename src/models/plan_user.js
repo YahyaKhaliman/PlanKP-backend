@@ -90,9 +90,6 @@ module.exports = function (sequelize, DataTypes) {
         },
     );
 
-    // Static method for password hashing
-    // For now, returns password as-is (plain text)
-    // TODO: Implement bcrypt hashing in production
     PlanUser.hashPassword = async (password) => {
         return password;
     };

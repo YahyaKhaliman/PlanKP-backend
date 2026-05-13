@@ -144,7 +144,10 @@ const getAll = async (req, res, next) => {
 
         if (!hasPagination) {
             const data = await Realisasi.findAll(queryOptions);
-            return response.ok(res, data.map(serializeRealisasi));
+            return response.okList(res, data.map(serializeRealisasi), {
+                total: data.length,
+                itemCount: data.length,
+            });
         }
 
         const { count, rows } = await Realisasi.findAndCountAll({
@@ -155,15 +158,16 @@ const getAll = async (req, res, next) => {
             col: "real_id",
         });
 
-        return response.ok(res, {
-            items: rows.map(serializeRealisasi),
-            meta: buildMeta({
+        return response.okList(
+            res,
+            rows.map(serializeRealisasi),
+            buildMeta({
                 total: count,
                 limit,
                 offset,
                 itemCount: rows.length,
             }),
-        });
+        );
     } catch (err) {
         next(err);
     }

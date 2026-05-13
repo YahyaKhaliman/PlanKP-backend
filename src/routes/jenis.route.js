@@ -1,6 +1,8 @@
 const router = require("express").Router();
 const jenis = require("../controllers/jenis.controller");
-const { allowOnly } = require("../middleware/auth");
+const { verifyToken, allowOnly } = require("../middleware/auth");
+
+router.use(verifyToken);
 
 router.get("/jenis", allowOnly("admin"), jenis.getAll);
 router.post("/jenis", allowOnly("admin"), jenis.create);

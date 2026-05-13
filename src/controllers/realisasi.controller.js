@@ -4,6 +4,7 @@ const {
     plan_jadwal: Jadwal,
     plan_inventaris: Inventaris,
     plan_checklist_template: ChecklistTemplate,
+    plan_jenis: Jenis,
     plan_user: User,
     sequelize,
 } = require("../models");
@@ -31,6 +32,26 @@ const splitPabrikCodes = (value) => {
     return raw
         .map((code) => String(code).trim())
         .filter((code) => code.length > 0);
+};
+
+const normalizeDateOnly = (value) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    date.setHours(0, 0, 0, 0);
+    return date;
+};
+
+const addDays = (date, days) => {
+    const result = new Date(date);
+    result.setDate(result.getDate() + days);
+    return result;
+};
+
+const formatDateOnly = (date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
 };
 
 const resolveRealisasiSort = (sortBy, orderBy) => {
@@ -451,6 +472,36 @@ const create = async (req, res, next) => {
                 "Inventaris tidak sesuai dengan jenis pada jadwal",
                 400,
             );
+        }
+
+        const jenis = await Jenis.findByPk(jadwal.jdw_jenis_id, {
+            attributes: ["jenis_id", "jenis_gap_hari"],
+        });
+        const gapHari = Number(jenis?.jenis_gap_hari || 0);
+        if (gapHari > 0) {
+            const lastSelesai = await Realisasi.findOne({
+                where: {
+                    real_inv_id: real_inv_id,
+                    real_status: "Selesai",
+                },
+                attributes: ["real_tgl"],
+                order: [["real_tgl", "DESC"]],
+            });
+
+            if (lastSelesai?.real_tgl) {
+                const lastDate = normalizeDateOnly(lastSelesai.real_tgl);
+                const currentDate = normalizeDateOnly(real_tgl);
+                if (lastDate && currentDate) {
+                    const nextEligibleDate = addDays(lastDate, gapHari);
+                    if (currentDate < nextEligibleDate) {
+                        return response.error(
+                            res,
+                            `Inventaris belum melewati gap realisasi ${gapHari} hari. Bisa direalisasikan lagi pada ${formatDateOnly(nextEligibleDate)}`,
+                            400,
+                        );
+                    }
+                }
+            }
         }
 
         const allowedPabrikCodes = splitPabrikCodes(jadwal.jdw_pabrik_kode);

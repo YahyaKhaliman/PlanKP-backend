@@ -44,7 +44,12 @@ const getMetadata = async (req, res, next) => {
         const [jenisList, pabrikList] = await Promise.all([
             Jenis.findAll({
                 where: jenisWhere,
-                attributes: ["jenis_id", "jenis_nama", "jenis_kategori"],
+                attributes: [
+                    "jenis_id",
+                    "jenis_nama",
+                    "jenis_kategori",
+                    "jenis_gap_hari",
+                ],
                 order: [["jenis_nama", "ASC"]],
             }),
             fetchPabrikList(),

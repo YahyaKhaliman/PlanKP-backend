@@ -3,6 +3,7 @@ const {
     plan_user: User,
     plan_inventaris: Inventaris,
     plan_jenis: Jenis,
+    plan_realisasi: Realisasi,
     sequelize,
 } = require("../models");
 const UserService = require("../services/user.service");
@@ -176,6 +177,26 @@ const isValidDateInput = (value) => {
 const parsePositiveId = (value) => {
     const n = Number(value);
     return Number.isInteger(n) && n > 0 ? n : null;
+};
+
+const normalizeDateOnly = (value) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    date.setHours(0, 0, 0, 0);
+    return date;
+};
+
+const addDays = (date, days) => {
+    const result = new Date(date);
+    result.setDate(result.getDate() + days);
+    return result;
+};
+
+const formatDateOnlyLocal = (date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
 };
 
 const getUserDivisiScope = (req) =>
@@ -848,11 +869,81 @@ const getOne = async (req, res, next) => {
             order: [["inv_nama", "ASC"]],
         });
 
+        const jenisData = await Jenis.findByPk(data.jdw_jenis_id, {
+            attributes: ["jenis_id", "jenis_gap_hari"],
+        });
+        const gapHari = Number(jenisData?.jenis_gap_hari || 0);
+        const todayDate = normalizeDateOnly(new Date());
+
+        let inventoryWithGap = inventarisList.map((inv) => {
+            const plain = inv.get({ plain: true });
+            return {
+                ...plain,
+                inv_jenis: plain.inv_jenis_id,
+                inv_is_gap_eligible: true,
+                inv_next_eligible_date: null,
+            };
+        });
+
+        if (gapHari > 0 && todayDate) {
+            const invIds = inventoryWithGap.map((inv) => inv.inv_id);
+            if (invIds.length > 0) {
+                const latestRows = await Realisasi.findAll({
+                    where: {
+                        real_inv_id: { [Op.in]: invIds },
+                        real_status: "Selesai",
+                    },
+                    attributes: [
+                        "real_inv_id",
+                        [
+                            sequelize.fn("MAX", sequelize.col("real_tgl")),
+                            "last_tgl",
+                        ],
+                    ],
+                    group: ["real_inv_id"],
+                    raw: true,
+                });
+
+                const lastByInvId = new Map(
+                    latestRows.map((row) => [
+                        Number(row.real_inv_id),
+                        row.last_tgl,
+                    ]),
+                );
+
+                inventoryWithGap = inventoryWithGap.map((inv) => {
+                    const lastDateRaw = lastByInvId.get(Number(inv.inv_id));
+                    if (!lastDateRaw) return inv;
+
+                    const lastDate = normalizeDateOnly(lastDateRaw);
+                    if (!lastDate) return inv;
+
+                    const nextEligible = addDays(lastDate, gapHari);
+                    const eligible = todayDate >= nextEligible;
+
+                    return {
+                        ...inv,
+                        inv_is_gap_eligible: eligible,
+                        inv_next_eligible_date:
+                            formatDateOnlyLocal(nextEligible),
+                    };
+                });
+            }
+        }
+
+        const eligibleInventaris = inventoryWithGap.filter(
+            (inv) => inv.inv_is_gap_eligible,
+        );
+        const nonEligibleInventaris = inventoryWithGap.filter(
+            (inv) => !inv.inv_is_gap_eligible,
+        );
+
         const jadwalPayload = serializeJadwal(data);
 
         return response.ok(res, {
             jadwal: jadwalPayload,
-            inventaris: inventarisList.map(serializeInventaris),
+            inventaris: eligibleInventaris,
+            inventaris_non_eligible: nonEligibleInventaris,
         });
     } catch (err) {
         next(err);

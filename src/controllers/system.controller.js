@@ -15,10 +15,11 @@ const REALISASI_STATUS = ["Draft", "Selesai"];
 const KONDISI_LIST = ["Baik", "Perlu Perhatian", "Rusak"];
 
 const fetchPabrikList = async () => {
+    const dbHelper = process.env.DB_HELPER || 'kencanaprint';
     return sequelize.query(
         `
         SELECT pab_kode, pab_nama, pab_alamat, pab_pabrik
-        FROM kencanaprint.tpabrik
+        FROM ${dbHelper}.tpabrik
         ORDER BY pab_kode ASC
         `,
         { type: QueryTypes.SELECT },

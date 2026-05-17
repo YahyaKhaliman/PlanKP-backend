@@ -32,7 +32,7 @@ module.exports = function (sequelize, DataTypes) {
         {
             sequelize,
             tableName: "tpabrik",
-            schema: "kencanaprint",
+            schema: process.env.DB_HELPER,
             timestamps: false,
             indexes: [
                 {

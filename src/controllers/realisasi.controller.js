@@ -519,20 +519,36 @@ const create = async (req, res, next) => {
         const duplicateWhere = {
             real_jadwal_id,
             real_inv_id,
-            real_tgl,
         };
+
+        if (jadwal.jdw_frekuensi === "Mingguan") {
+            duplicateWhere.real_week_number = weekNo;
+            duplicateWhere.real_tahun = tahun;
+        } else if (jadwal.jdw_frekuensi === "Bulanan") {
+            duplicateWhere.real_bulan = bulan;
+            duplicateWhere.real_tahun = tahun;
+        } else {
+            duplicateWhere.real_tgl = real_tgl;
+        }
 
         const existingRealisasi = await Realisasi.findOne({
             where: duplicateWhere,
             attributes: ["real_id"],
         });
 
-        if (existingRealisasi)
+        if (existingRealisasi) {
+            const periodStr =
+                jadwal.jdw_frekuensi === "Mingguan"
+                    ? "minggu"
+                    : jadwal.jdw_frekuensi === "Bulanan"
+                      ? "bulan"
+                      : "tanggal";
             return response.error(
                 res,
-                "Realisasi untuk jadwal dan inventaris ini pada tanggal yang sama sudah ada",
+                `Realisasi untuk jadwal dan inventaris ini pada ${periodStr} yang sama sudah ada`,
                 409,
             );
+        }
 
         const payload = {
             real_jadwal_id,

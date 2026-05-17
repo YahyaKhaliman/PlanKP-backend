@@ -174,6 +174,62 @@ const isValidDateInput = (value) => {
     return !Number.isNaN(d.getTime());
 };
 
+const parseDateOnlyParts = (value) => {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    if (
+        !Number.isInteger(year) ||
+        !Number.isInteger(month) ||
+        !Number.isInteger(day)
+    ) {
+        return null;
+    }
+
+    const date = new Date(year, month - 1, day);
+    if (
+        Number.isNaN(date.getTime()) ||
+        date.getFullYear() !== year ||
+        date.getMonth() !== month - 1 ||
+        date.getDate() !== day
+    ) {
+        return null;
+    }
+
+    return date;
+};
+
+const validateFrekuensiStartDate = (frekuensi, tglMulai) => {
+    const date = parseDateOnlyParts(String(tglMulai || ""));
+    if (!date) {
+        return {
+            valid: false,
+            message: "Format tanggal mulai harus YYYY-MM-DD",
+        };
+    }
+
+    if (frekuensi === "Mingguan" && date.getDay() !== 1) {
+        return {
+            valid: false,
+            message: "Tanggal mulai untuk frekuensi Mingguan harus hari Senin",
+        };
+    }
+
+    if (frekuensi === "Bulanan" && date.getDate() !== 1) {
+        return {
+            valid: false,
+            message: "Tanggal mulai untuk frekuensi Bulanan harus tanggal 1",
+        };
+    }
+
+    return { valid: true };
+};
+
 const parsePositiveId = (value) => {
     const n = Number(value);
     return Number.isInteger(n) && n > 0 ? n : null;
@@ -207,7 +263,7 @@ const buildAdminAssignedUserScope = (req) => ({
     user_divisi: getUserDivisiScope(req),
 });
 
-const HARI_LIBUR_SCHEMA = "hrd2";
+const HARI_LIBUR_SCHEMA = process.env.DB_HRD || "hrd2";
 const HARI_LIBUR_TABLE = "tharilibur";
 const HARI_LIBUR_DATE_COLUMN_CANDIDATES = [
     "hl_tanggal",
@@ -461,10 +517,11 @@ const buildPeriodeWhere = ({
 const validatePabrikCodes = async (codes) => {
     if (!codes.length) return [];
 
+    const dbHelper = process.env.DB_HELPER || 'kencanaprint';
     const rows = await sequelize.query(
         `
         SELECT pab_kode
-        FROM kencanaprint.tpabrik
+        FROM ${dbHelper}.tpabrik
         WHERE pab_kode IN (:codes)
         `,
         {
@@ -988,6 +1045,14 @@ const create = async (req, res, next) => {
         if (jdw_tgl_selesai && !isValidDateInput(jdw_tgl_selesai))
             return response.error(res, "Tanggal selesai tidak valid", 400);
 
+        const frekuensiStartValidation = validateFrekuensiStartDate(
+            jdw_frekuensi,
+            jdw_tgl_mulai,
+        );
+        if (!frekuensiStartValidation.valid) {
+            return response.error(res, frekuensiStartValidation.message, 400);
+        }
+
         const parsedTarget = Number(jdw_target ?? 1);
         if (!Number.isInteger(parsedTarget) || parsedTarget < 1)
             return response.error(
@@ -1207,6 +1272,14 @@ const update = async (req, res, next) => {
         }
         if (data.jdw_tgl_selesai && !isValidDateInput(data.jdw_tgl_selesai)) {
             return response.error(res, "Tanggal selesai tidak valid", 400);
+        }
+
+        const frekuensiStartValidation = validateFrekuensiStartDate(
+            data.jdw_frekuensi,
+            data.jdw_tgl_mulai,
+        );
+        if (!frekuensiStartValidation.valid) {
+            return response.error(res, frekuensiStartValidation.message, 400);
         }
 
         const tgl = new Date(data.jdw_tgl_mulai);

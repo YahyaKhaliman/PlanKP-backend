@@ -263,7 +263,7 @@ const buildAdminAssignedUserScope = (req) => ({
     user_divisi: getUserDivisiScope(req),
 });
 
-const HARI_LIBUR_SCHEMA = process.env.DB_HRD || "hrd2";
+const HARI_LIBUR_SCHEMA = process.env.DB_HRD;
 const HARI_LIBUR_TABLE = "tharilibur";
 const HARI_LIBUR_DATE_COLUMN_CANDIDATES = [
     "hl_tanggal",
@@ -517,7 +517,7 @@ const buildPeriodeWhere = ({
 const validatePabrikCodes = async (codes) => {
     if (!codes.length) return [];
 
-    const dbHelper = process.env.DB_HELPER || 'kencanaprint';
+    const dbHelper = process.env.DB_HELPER || "kencanaprint";
     const rows = await sequelize.query(
         `
         SELECT pab_kode

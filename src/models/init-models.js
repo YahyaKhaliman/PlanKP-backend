@@ -7,6 +7,7 @@ var _plan_realisasi = require("./plan_realisasi");
 var _plan_user = require("./plan_user");
 var _plan_jenis = require("./plan_jenis");
 var _tpabrik = require("./tpabrik");
+var _log_plankp = require("./log_plankp");
 
 function initModels(sequelize) {
     var plan_checklist_template = _plan_checklist_template(
@@ -20,6 +21,7 @@ function initModels(sequelize) {
     var plan_user = _plan_user(sequelize, DataTypes);
     var plan_jenis = _plan_jenis(sequelize, DataTypes);
     var tpabrik = _tpabrik(sequelize, DataTypes);
+    var log_plankp = _log_plankp(sequelize, DataTypes);
 
     plan_hasil_checklist.belongsTo(plan_checklist_template, {
         as: "hc_ct",
@@ -119,6 +121,7 @@ function initModels(sequelize) {
         plan_user,
         plan_jenis,
         tpabrik,
+        log_plankp,
     };
 }
 module.exports = initModels;

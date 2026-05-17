@@ -1,5 +1,5 @@
 const jwt = require("jsonwebtoken");
-const { plan_user } = require("../models");
+const { plan_user, log_plankp } = require("../models");
 const response = require("../utils/response");
 const AuthService = require("../services/auth.service");
 
@@ -38,6 +38,13 @@ const login = async (req, res, next) => {
     try {
         const { user_nama, user_password } = req.body ?? {};
         if (!user_nama || !user_password) {
+            if (user_nama) {
+                await log_plankp.create({
+                    user_nama: user_nama,
+                    log_status: "GAGAL",
+                    log_keterangan: "Password tidak diisi",
+                });
+            }
             return response.error(
                 res,
                 "Nama pengguna dan password wajib diisi",
@@ -49,10 +56,21 @@ const login = async (req, res, next) => {
             user_nama,
             user_password,
         });
+        
         if (!result.ok) {
+            await log_plankp.create({
+                user_nama: user_nama,
+                log_status: "GAGAL",
+                log_keterangan: result.message,
+            });
             return response.error(res, result.message, result.status);
         }
 
+        await log_plankp.create({
+            user_nama: user_nama,
+            log_status: "BERHASIL",
+            log_keterangan: "Login berhasil",
+        });
         return response.ok(res, result.data, "Login berhasil");
     } catch (err) {
         next(err);

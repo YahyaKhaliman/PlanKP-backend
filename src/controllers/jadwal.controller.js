@@ -927,7 +927,7 @@ const getOne = async (req, res, next) => {
         });
 
         const jenisData = await Jenis.findByPk(data.jdw_jenis_id, {
-            attributes: ["jenis_id", "jenis_gap_hari"],
+            attributes: ["jenis_id", "jenis_gap_hari", "jenis_nama"],
         });
         const gapHari = Number(jenisData?.jenis_gap_hari || 0);
         const todayDate = normalizeDateOnly(new Date());
@@ -936,7 +936,7 @@ const getOne = async (req, res, next) => {
             const plain = inv.get({ plain: true });
             return {
                 ...plain,
-                inv_jenis: plain.inv_jenis_id,
+                inv_jenis: jenisData?.jenis_nama || plain.inv_jenis_id,
                 inv_is_gap_eligible: true,
                 inv_next_eligible_date: null,
             };
@@ -996,6 +996,9 @@ const getOne = async (req, res, next) => {
         );
 
         const jadwalPayload = serializeJadwal(data);
+        if (jenisData && jenisData.jenis_nama) {
+            jadwalPayload.jdw_inv_jenis = jenisData.jenis_nama;
+        }
 
         return response.ok(res, {
             jadwal: jadwalPayload,

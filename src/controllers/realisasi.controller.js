@@ -115,19 +115,12 @@ const getAll = async (req, res, next) => {
         if (tahun) where.real_tahun = tahun;
         if (teknisi_id) where.real_teknisi_id = teknisi_id;
 
-        const useDivisiScope = String(by_divisi || "").toLowerCase() === "true";
         const isAdmin = isAdminUser(req);
-        const selfOnlyScope = !isAdmin && isSelfOnlyRealisasiRole(req);
         const userDivisi =
             normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
 
-        if (useDivisiScope && !isAdmin && !selfOnlyScope) {
+        if (!isAdmin) {
             includeJadwal.where = { jdw_divisi: userDivisi };
-        }
-
-        // Role user/teknisi/it_support selalu hanya boleh melihat realisasi miliknya.
-        if (selfOnlyScope) {
-            where.real_teknisi_id = req.user.user_id;
         }
 
         const queryOptions = {

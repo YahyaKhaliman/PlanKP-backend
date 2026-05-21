@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 
 const { sequelize } = require("./models");
 const { errorHandler, notFound } = require("./middleware/errorHandler");
@@ -23,6 +24,8 @@ app.use(
 app.use(logger);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
+app.use("/public", express.static(path.join(__dirname, "../public")));
+
 
 app.get("/api/health", (req, res) =>
     res.json({ success: true, message: "PlanKP API running" }),

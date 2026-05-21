@@ -98,6 +98,10 @@ module.exports = function (sequelize, DataTypes) {
                     key: "user_id",
                 },
             },
+            real_foto: {
+                type: DataTypes.STRING(255),
+                allowNull: true,
+            },
             real_created_at: {
                 type: DataTypes.DATE,
                 allowNull: false,

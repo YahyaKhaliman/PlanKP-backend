@@ -1,3 +1,5 @@
+const fs = require("fs");
+const path = require("path");
 const {
     plan_realisasi: Realisasi,
     plan_hasil_checklist: HasilChecklist,
@@ -210,6 +212,7 @@ const getOne = async (req, res, next) => {
                 r.real_ttd_data,
                 r.real_ttd_at,
                 r.real_approved_at,
+                r.real_foto,
                 v.jdw_judul,
                 v.jdw_frekuensi,
                 v.jdw_divisi,
@@ -322,6 +325,7 @@ const getOne = async (req, res, next) => {
             real_ttd_data: row.real_ttd_data,
             real_ttd_at: row.real_ttd_at,
             real_approved_at: row.real_approved_at,
+            real_foto: row.real_foto ? `${req.protocol}://${req.get("host")}/public/image/realisasi/${row.real_foto}` : null,
             jadwal: {
                 jdw_id: row.real_jadwal_id,
                 jdw_judul: row.jdw_judul,
@@ -708,6 +712,7 @@ const update = async (req, res, next) => {
             "real_jam_selesai",
             "real_kondisi_akhir",
             "real_keterangan",
+            "real_foto",
         ];
         fields.forEach((f) => {
             if (req.body[f] !== undefined) real[f] = req.body[f];
@@ -720,6 +725,71 @@ const update = async (req, res, next) => {
     }
 };
 
+// POST /realisasi/:id/foto — upload foto kendala/bukti realisasi
+const uploadFoto = async (req, res, next) => {
+    try {
+        if (!req.file) {
+            return response.error(res, "File foto wajib diunggah", 400);
+        }
+
+        const real = await Realisasi.findByPk(req.params.id);
+        if (!real) {
+            const newFilePath = path.join(__dirname, "../../public/image/realisasi", req.file.filename);
+            if (fs.existsSync(newFilePath)) {
+                fs.unlinkSync(newFilePath);
+            }
+            return response.error(res, "Realisasi tidak ditemukan", 404);
+        }
+
+        if (
+            !isAdminUser(req) &&
+            isSelfOnlyRealisasiRole(req) &&
+            Number(real.real_teknisi_id) !== Number(req.user.user_id)
+        ) {
+            const newFilePath = path.join(__dirname, "../../public/image/realisasi", req.file.filename);
+            if (fs.existsSync(newFilePath)) {
+                fs.unlinkSync(newFilePath);
+            }
+            return response.error(res, "Akses upload foto ditolak", 403);
+        }
+
+        if (real.real_status === "Selesai") {
+            const newFilePath = path.join(__dirname, "../../public/image/realisasi", req.file.filename);
+            if (fs.existsSync(newFilePath)) {
+                fs.unlinkSync(newFilePath);
+            }
+            return response.error(res, "Realisasi sudah selesai, foto tidak dapat diubah lagi", 400);
+        }
+
+        // Hapus foto lama jika ada
+        if (real.real_foto) {
+            const oldFilePath = path.join(__dirname, "../../public/image/realisasi", real.real_foto);
+            if (fs.existsSync(oldFilePath)) {
+                try {
+                    fs.unlinkSync(oldFilePath);
+                } catch (e) {
+                    console.error("Gagal menghapus file lama:", e.message);
+                }
+            }
+        }
+
+        // Simpan nama file ke database
+        real.real_foto = req.file.filename;
+        await real.save();
+
+        const fileUrl = `${req.protocol}://${req.get("host")}/public/image/realisasi/${req.file.filename}`;
+        return response.ok(res, { real_foto: fileUrl }, "Foto realisasi berhasil diunggah");
+    } catch (err) {
+        if (req.file) {
+            const newFilePath = path.join(__dirname, "../../public/image/realisasi", req.file.filename);
+            if (fs.existsSync(newFilePath)) {
+                fs.unlinkSync(newFilePath);
+            }
+        }
+        next(err);
+    }
+};
+
 module.exports = {
     getAll,
     getOne,
@@ -728,4 +798,5 @@ module.exports = {
     saveChecklist,
     saveTtd,
     getTemplate,
+    uploadFoto,
 };

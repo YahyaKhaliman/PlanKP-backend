@@ -1,6 +1,7 @@
 const router = require("express").Router();
 const { verifyToken } = require("../middleware/auth");
 const realisasi = require("../controllers/realisasi.controller");
+const upload = require("../middleware/multer");
 
 router.use(verifyToken);
 
@@ -11,5 +12,6 @@ router.post("/realisasi", realisasi.create);
 router.put("/realisasi/:id", realisasi.update);
 router.post("/realisasi/:id/checklist", realisasi.saveChecklist);
 router.post("/realisasi/:id/ttd", realisasi.saveTtd);
+router.post("/realisasi/:id/foto", upload.single("foto"), realisasi.uploadFoto);
 
 module.exports = router;

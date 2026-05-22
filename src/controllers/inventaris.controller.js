@@ -104,6 +104,7 @@ const create = async (req, res, next) => {
             inv_tgl_beli,
             inv_kondisi,
             inv_notes,
+            inv_is_active,
         } = req.body;
 
         if (!inv_no || !inv_nama || !inv_jenis_id)
@@ -139,6 +140,7 @@ const create = async (req, res, next) => {
             inv_tgl_beli,
             inv_kondisi,
             inv_notes,
+            inv_is_active: inv_is_active !== undefined ? inv_is_active : 1,
         });
         return response.created(res, data, "Inventaris berhasil ditambahkan");
     } catch (err) {
@@ -164,6 +166,7 @@ const update = async (req, res, next) => {
             "inv_tgl_beli",
             "inv_kondisi",
             "inv_notes",
+            "inv_is_active",
         ];
         fields.forEach((f) => {
             if (req.body[f] !== undefined) data[f] = req.body[f];

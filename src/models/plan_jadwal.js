@@ -29,6 +29,11 @@ module.exports = function (sequelize, DataTypes) {
                 type: DataTypes.ENUM("Harian", "Mingguan", "Bulanan"),
                 allowNull: false,
             },
+            jdw_gap_hari: {
+                type: DataTypes.INTEGER,
+                allowNull: false,
+                defaultValue: 0,
+            },
             jdw_tgl_mulai: {
                 type: DataTypes.DATEONLY,
                 allowNull: false,

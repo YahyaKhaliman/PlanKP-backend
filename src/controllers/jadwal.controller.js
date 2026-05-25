@@ -1018,6 +1018,7 @@ const create = async (req, res, next) => {
             jdw_jenis_id,
             jdw_divisi,
             jdw_frekuensi,
+            jdw_gap_hari,
             jdw_tgl_mulai,
             jdw_tgl_selesai,
             jdw_target,
@@ -1063,6 +1064,18 @@ const create = async (req, res, next) => {
                 "Target jadwal wajib berupa angka bulat minimal 1",
                 400,
             );
+
+        let parsedGapHari = 0;
+        if (["Mingguan", "Bulanan"].includes(jdw_frekuensi)) {
+            parsedGapHari = Number(jdw_gap_hari ?? 0);
+            if (!Number.isInteger(parsedGapHari) || parsedGapHari < 0) {
+                return response.error(
+                    res,
+                    "Gap realisasi wajib berupa angka bulat minimal 0 untuk frekuensi Mingguan/Bulanan",
+                    400,
+                );
+            }
+        }
 
         const jenisData = await findActiveJenis(jdw_jenis_id, req.adminScope);
         if (!jenisData) {
@@ -1130,6 +1143,7 @@ const create = async (req, res, next) => {
             jdw_jenis_id,
             jdw_divisi: normalizedDivisi,
             jdw_frekuensi,
+            jdw_gap_hari: parsedGapHari,
             jdw_tgl_mulai,
             jdw_tgl_selesai: jdw_tgl_selesai || null,
             jdw_week_number: weekNo,
@@ -1168,6 +1182,7 @@ const update = async (req, res, next) => {
             "jdw_judul",
             "jdw_jenis_id",
             "jdw_frekuensi",
+            "jdw_gap_hari",
             "jdw_divisi",
             "jdw_tgl_mulai",
             "jdw_tgl_selesai",
@@ -1245,6 +1260,20 @@ const update = async (req, res, next) => {
             if (!allowedFrekuensi.includes(data.jdw_frekuensi)) {
                 return response.error(res, "Frekuensi jadwal tidak valid", 400);
             }
+        }
+
+        if (["Mingguan", "Bulanan"].includes(data.jdw_frekuensi)) {
+            const parsedGapHari = Number(data.jdw_gap_hari ?? 0);
+            if (!Number.isInteger(parsedGapHari) || parsedGapHari < 0) {
+                return response.error(
+                    res,
+                    "Gap realisasi wajib berupa angka bulat minimal 0 untuk frekuensi Mingguan/Bulanan",
+                    400,
+                );
+            }
+            data.jdw_gap_hari = parsedGapHari;
+        } else {
+            data.jdw_gap_hari = 0;
         }
 
         if (req.body.jdw_target !== undefined) {

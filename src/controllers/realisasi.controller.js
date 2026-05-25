@@ -325,7 +325,9 @@ const getOne = async (req, res, next) => {
             real_ttd_data: row.real_ttd_data,
             real_ttd_at: row.real_ttd_at,
             real_approved_at: row.real_approved_at,
-            real_foto: row.real_foto ? `${req.protocol}://${req.get("host")}/public/image/realisasi/${row.real_foto}` : null,
+            real_foto: row.real_foto
+                ? `${req.protocol}://${req.get("host")}/public/image/realisasi/${row.real_foto}`
+                : null,
             jadwal: {
                 jdw_id: row.real_jadwal_id,
                 jdw_judul: row.jdw_judul,
@@ -393,6 +395,7 @@ const create = async (req, res, next) => {
             attributes: [
                 "jdw_id",
                 "jdw_frekuensi",
+                "jdw_gap_hari",
                 "jdw_week_number",
                 "jdw_bulan",
                 "jdw_tahun",
@@ -494,6 +497,37 @@ const create = async (req, res, next) => {
                         return response.error(
                             res,
                             `Inventaris belum melewati gap realisasi ${gapHari} hari. Bisa direalisasikan lagi pada ${formatDateOnly(nextEligibleDate)}`,
+                            400,
+                        );
+                    }
+                }
+            }
+        }
+
+        // Gap realisasi level jadwal (khusus Mingguan/Bulanan), tidak berbasis inventaris.
+        const jadwalGapHari = Number(jadwal.jdw_gap_hari || 0);
+        if (
+            ["Mingguan", "Bulanan"].includes(jadwal.jdw_frekuensi) &&
+            jadwalGapHari > 0
+        ) {
+            const lastSelesaiJadwal = await Realisasi.findOne({
+                where: {
+                    real_jadwal_id,
+                    real_status: "Selesai",
+                },
+                attributes: ["real_tgl"],
+                order: [["real_tgl", "DESC"]],
+            });
+
+            if (lastSelesaiJadwal?.real_tgl) {
+                const lastDate = normalizeDateOnly(lastSelesaiJadwal.real_tgl);
+                const currentDate = normalizeDateOnly(real_tgl);
+                if (lastDate && currentDate) {
+                    const nextEligibleDate = addDays(lastDate, jadwalGapHari);
+                    if (currentDate < nextEligibleDate) {
+                        return response.error(
+                            res,
+                            `Jadwal ini memiliki gap realisasi ${jadwalGapHari} hari. Realisasi berikutnya dapat dilakukan pada ${formatDateOnly(nextEligibleDate)}`,
                             400,
                         );
                     }
@@ -734,7 +768,11 @@ const uploadFoto = async (req, res, next) => {
 
         const real = await Realisasi.findByPk(req.params.id);
         if (!real) {
-            const newFilePath = path.join(__dirname, "../../public/image/realisasi", req.file.filename);
+            const newFilePath = path.join(
+                __dirname,
+                "../../public/image/realisasi",
+                req.file.filename,
+            );
             if (fs.existsSync(newFilePath)) {
                 fs.unlinkSync(newFilePath);
             }
@@ -746,7 +784,11 @@ const uploadFoto = async (req, res, next) => {
             isSelfOnlyRealisasiRole(req) &&
             Number(real.real_teknisi_id) !== Number(req.user.user_id)
         ) {
-            const newFilePath = path.join(__dirname, "../../public/image/realisasi", req.file.filename);
+            const newFilePath = path.join(
+                __dirname,
+                "../../public/image/realisasi",
+                req.file.filename,
+            );
             if (fs.existsSync(newFilePath)) {
                 fs.unlinkSync(newFilePath);
             }
@@ -754,16 +796,28 @@ const uploadFoto = async (req, res, next) => {
         }
 
         if (real.real_status === "Selesai") {
-            const newFilePath = path.join(__dirname, "../../public/image/realisasi", req.file.filename);
+            const newFilePath = path.join(
+                __dirname,
+                "../../public/image/realisasi",
+                req.file.filename,
+            );
             if (fs.existsSync(newFilePath)) {
                 fs.unlinkSync(newFilePath);
             }
-            return response.error(res, "Realisasi sudah selesai, foto tidak dapat diubah lagi", 400);
+            return response.error(
+                res,
+                "Realisasi sudah selesai, foto tidak dapat diubah lagi",
+                400,
+            );
         }
 
         // Hapus foto lama jika ada
         if (real.real_foto) {
-            const oldFilePath = path.join(__dirname, "../../public/image/realisasi", real.real_foto);
+            const oldFilePath = path.join(
+                __dirname,
+                "../../public/image/realisasi",
+                real.real_foto,
+            );
             if (fs.existsSync(oldFilePath)) {
                 try {
                     fs.unlinkSync(oldFilePath);
@@ -778,10 +832,18 @@ const uploadFoto = async (req, res, next) => {
         await real.save();
 
         const fileUrl = `${req.protocol}://${req.get("host")}/public/image/realisasi/${req.file.filename}`;
-        return response.ok(res, { real_foto: fileUrl }, "Foto realisasi berhasil diunggah");
+        return response.ok(
+            res,
+            { real_foto: fileUrl },
+            "Foto realisasi berhasil diunggah",
+        );
     } catch (err) {
         if (req.file) {
-            const newFilePath = path.join(__dirname, "../../public/image/realisasi", req.file.filename);
+            const newFilePath = path.join(
+                __dirname,
+                "../../public/image/realisasi",
+                req.file.filename,
+            );
             if (fs.existsSync(newFilePath)) {
                 fs.unlinkSync(newFilePath);
             }

@@ -935,6 +935,7 @@ const getOne = async (req, res, next) => {
                 "inv_pabrik_kode",
                 "inv_pic",
                 "inv_kondisi",
+                "inv_serial_number",
             ],
             order: [["inv_nama", "ASC"]],
         });

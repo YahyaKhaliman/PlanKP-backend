@@ -127,12 +127,13 @@ const calculateJadwalCountdown = ({
     today,
 }) => {
     const todayDate = normalizeDateOnly(today || new Date());
+    const normalizedStartDate = normalizeDateOnly(startDate);
     const periodAnchor = getCurrentPeriodAnchor(
         startDate,
         frekuensi,
         todayDate,
     );
-    if (!todayDate || !periodAnchor) {
+    if (!todayDate || !periodAnchor || !normalizedStartDate) {
         return {
             periodFulfilled: false,
             currentPeriodStart: null,
@@ -153,6 +154,20 @@ const calculateJadwalCountdown = ({
             : 0;
 
     const periodFulfilled = safeSelesai >= safeTarget;
+
+    // Jadwal belum mulai: selalu hitung menuju tanggal mulai,
+    // jangan dipaksa "hari ini".
+    if (normalizedStartDate > todayDate) {
+        return {
+            periodFulfilled: false,
+            currentPeriodStart: formatDateOnly(normalizedStartDate),
+            nextDueDate: formatDateOnly(normalizedStartDate),
+            daysRemaining: Math.floor(
+                (normalizedStartDate - todayDate) / 86400000,
+            ),
+        };
+    }
+
     const dueDate = periodFulfilled
         ? addByFrequency(periodAnchor, frekuensi, 1)
         : periodAnchor;
@@ -160,7 +175,8 @@ const calculateJadwalCountdown = ({
         ? Math.floor((dueDate - todayDate) / 86400000)
         : null;
 
-    // For ongoing weekly/monthly periods, keep status as "today" until target is fulfilled.
+    // Untuk periode yang sedang berjalan, tampilkan minimal "hari ini" (0),
+    // tetapi tidak berlaku untuk jadwal yang belum mulai (sudah ditangani di atas).
     if (
         !periodFulfilled &&
         (frekuensi === "Mingguan" || frekuensi === "Bulanan") &&

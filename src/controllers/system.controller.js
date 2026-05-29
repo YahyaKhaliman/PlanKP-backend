@@ -155,7 +155,7 @@ const getDashboardSummary = async (req, res, next) => {
             FROM plan_inventaris i
             JOIN plan_jadwal j ON j.jdw_jenis_id = i.inv_jenis_id
             WHERE i.inv_is_active = 1
-              AND j.jdw_status = 'Selesai'
+              AND j.jdw_status = 'Draft'
               ${unitWhereSql}
             `,
             {

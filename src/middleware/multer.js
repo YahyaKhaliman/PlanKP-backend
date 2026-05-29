@@ -23,11 +23,31 @@ const storage = multer.diskStorage({
 
 // Filter tipe file yang diperbolehkan (hanya gambar)
 const fileFilter = (req, file, cb) => {
-    const allowedTypes = ["image/jpeg", "image/png", "image/jpg", "image/webp"];
-    if (allowedTypes.includes(file.mimetype)) {
+    const allowedTypes = new Set([
+        "image/jpeg",
+        "image/png",
+        "image/jpg",
+        "image/webp",
+    ]);
+    const allowedExt = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    const isAllowedMime = allowedTypes.has(
+        String(file.mimetype || "").toLowerCase(),
+    );
+    const isAllowedExt = allowedExt.has(ext);
+
+    // Validasi gabungan mime + extension untuk mengakomodasi device yang
+    // kadang mengirim mimetype tidak konsisten saat upload kamera.
+    if (isAllowedMime || isAllowedExt) {
         cb(null, true);
     } else {
-        cb(new Error("Format file tidak didukung. Hanya diperbolehkan JPG, JPEG, PNG, dan WEBP."), false);
+        cb(
+            new Error(
+                "Format file tidak didukung. Hanya diperbolehkan JPG, JPEG, PNG, dan WEBP.",
+            ),
+            false,
+        );
     }
 };
 

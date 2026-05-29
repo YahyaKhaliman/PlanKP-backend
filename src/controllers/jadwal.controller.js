@@ -495,6 +495,7 @@ const buildPeriodeWhere = ({
         jdw_jenis_id: Number(jenisId),
         jdw_divisi: divisi,
         jdw_frekuensi: frekuensi,
+        jdw_status: { [Op.notIn]: ["Selesai", "Dibatalkan"] },
     };
 
     if (frekuensi === "Harian") {
@@ -564,7 +565,11 @@ const getAll = async (req, res, next) => {
                 400,
             );
         }
-        if (status) where.jdw_status = status;
+        if (status) {
+            where.jdw_status = status;
+        } else {
+            where.jdw_status = { [Op.ne]: "Selesai" };
+        }
         if (jenis) where.jdw_jenis_id = jenis;
         if (assigned_to) where.jdw_assigned_to = assigned_to;
         if (bulan) where.jdw_bulan = bulan;
@@ -685,7 +690,11 @@ const getByUser = async (req, res, next) => {
         const { hasPagination, limit, offset } = parsePagination(req.query);
         const order = resolveJadwalSort(req.query.sort, req.query.order);
         const where = { jdw_assigned_to: req.user.user_id };
-        if (status) where.jdw_status = status;
+        if (status) {
+            where.jdw_status = status;
+        } else {
+            where.jdw_status = { [Op.ne]: "Selesai" };
+        }
         if (jenis) where.jdw_jenis_id = jenis;
         if (tgl) {
             where[Op.and] = where[Op.and] || [];
@@ -762,7 +771,11 @@ const getByDivisi = async (req, res, next) => {
         const isAdmin = req.user.user_jabatan === "admin";
         const userDivisi = getUserDivisiScope(req);
         const where = { jdw_divisi: userDivisi };
-        if (status) where.jdw_status = status;
+        if (status) {
+            where.jdw_status = status;
+        } else {
+            where.jdw_status = { [Op.ne]: "Selesai" };
+        }
         if (jenis) where.jdw_jenis_id = jenis;
         if (tgl) {
             where[Op.and] = where[Op.and] || [];

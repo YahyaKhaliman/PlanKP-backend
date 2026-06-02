@@ -359,6 +359,191 @@ const getOne = async (req, res, next) => {
     }
 };
 
+// Helper function untuk validasi kelayakan realisasi
+const validateRealisasiEligibility = async (real_jadwal_id, real_inv_id, real_tgl) => {
+    if (!real_jadwal_id || !real_inv_id || !real_tgl)
+        return { error: "Jadwal, inventaris, dan tanggal wajib diisi", status: 400 };
+
+    const tgl = new Date(real_tgl);
+    if (Number.isNaN(tgl.getTime())) {
+        return { error: "Format tanggal realisasi tidak valid", status: 400 };
+    }
+    const bulan = getMonthNumber(tgl);
+    const tahun = getYear(tgl);
+    const weekNo = getWeekNumberUtil(tgl);
+
+    const jadwal = await Jadwal.findByPk(real_jadwal_id, {
+        attributes: [
+            "jdw_id",
+            "jdw_frekuensi",
+            "jdw_gap_hari",
+            "jdw_week_number",
+            "jdw_bulan",
+            "jdw_tahun",
+            "jdw_tgl_mulai",
+            "jdw_tgl_selesai",
+            "jdw_jenis_id",
+            "jdw_pabrik_kode",
+            "jdw_status",
+        ],
+    });
+    if (!jadwal) return { error: "Jadwal tidak ditemukan", status: 404 };
+
+    if (!["Draft", "Aktif"].includes(jadwal.jdw_status)) {
+        return { error: "Jadwal harus berstatus Draft/Aktif untuk realisasi", status: 400 };
+    }
+
+    const realDate = new Date(real_tgl);
+    const startDate = new Date(jadwal.jdw_tgl_mulai);
+    const endDate = jadwal.jdw_tgl_selesai
+        ? new Date(jadwal.jdw_tgl_selesai)
+        : null;
+    if (
+        Number.isNaN(startDate.getTime()) ||
+        (endDate && Number.isNaN(endDate.getTime()))
+    ) {
+        return { error: "Periode jadwal tidak valid, hubungi admin", status: 400 };
+    }
+
+    realDate.setHours(0, 0, 0, 0);
+    startDate.setHours(0, 0, 0, 0);
+    if (endDate) endDate.setHours(0, 0, 0, 0);
+
+    if (realDate < startDate) {
+        return { error: "Tanggal realisasi belum masuk periode jadwal", status: 400 };
+    }
+    if (endDate && realDate > endDate) {
+        return { error: "Tanggal realisasi melewati tanggal selesai jadwal", status: 400 };
+    }
+
+    const inventaris = await Inventaris.findOne({
+        where: {
+            inv_id: real_inv_id,
+            inv_is_active: 1,
+        },
+        attributes: ["inv_id", "inv_jenis_id", "inv_pabrik_kode"],
+    });
+    if (!inventaris) {
+        return { error: "Inventaris tidak ditemukan atau tidak aktif", status: 404 };
+    }
+
+    if (Number(inventaris.inv_jenis_id) !== Number(jadwal.jdw_jenis_id)) {
+        return { error: "Inventaris tidak sesuai dengan jenis pada jadwal", status: 400 };
+    }
+
+    const jenis = await Jenis.findByPk(jadwal.jdw_jenis_id, {
+        attributes: ["jenis_id", "jenis_gap_hari"],
+    });
+    const gapHari = Number(jenis?.jenis_gap_hari || 0);
+    if (gapHari > 0) {
+        const lastSelesai = await Realisasi.findOne({
+            where: {
+                real_inv_id: real_inv_id,
+                real_status: "Selesai",
+            },
+            attributes: ["real_tgl"],
+            order: [["real_tgl", "DESC"]],
+        });
+
+        if (lastSelesai?.real_tgl) {
+            const lastDate = normalizeDateOnly(lastSelesai.real_tgl);
+            const currentDate = normalizeDateOnly(real_tgl);
+            if (lastDate && currentDate) {
+                const nextEligibleDate = addDays(lastDate, gapHari);
+                if (currentDate < nextEligibleDate) {
+                    return { error: `Inventaris belum melewati gap realisasi ${gapHari} hari. Bisa direalisasikan lagi pada ${formatDateOnly(nextEligibleDate)}`, status: 400 };
+                }
+            }
+        }
+    }
+
+    // Gap realisasi level jadwal (khusus Mingguan/Bulanan), tidak berbasis inventaris.
+    const jadwalGapHari = Number(jadwal.jdw_gap_hari || 0);
+    if (
+        ["Mingguan", "Bulanan"].includes(jadwal.jdw_frekuensi) &&
+        jadwalGapHari > 0
+    ) {
+        const lastSelesaiJadwal = await Realisasi.findOne({
+            where: {
+                real_jadwal_id,
+                real_status: "Selesai",
+            },
+            attributes: ["real_tgl"],
+            order: [["real_tgl", "DESC"]],
+        });
+
+        if (lastSelesaiJadwal?.real_tgl) {
+            const lastDate = normalizeDateOnly(lastSelesaiJadwal.real_tgl);
+            const currentDate = normalizeDateOnly(real_tgl);
+            if (lastDate && currentDate) {
+                const nextEligibleDate = addDays(lastDate, jadwalGapHari);
+                if (currentDate < nextEligibleDate) {
+                    return { error: `Jadwal ini memiliki gap realisasi ${jadwalGapHari} hari. Realisasi berikutnya dapat dilakukan pada ${formatDateOnly(nextEligibleDate)}`, status: 400 };
+                }
+            }
+        }
+    }
+
+    const allowedPabrikCodes = splitPabrikCodes(jadwal.jdw_pabrik_kode);
+    if (
+        allowedPabrikCodes.length > 0 &&
+        !allowedPabrikCodes.includes(String(inventaris.inv_pabrik_kode))
+    ) {
+        return { error: "Inventaris tidak termasuk pabrik/lokasi jadwal", status: 400 };
+    }
+
+    const duplicateWhere = {
+        real_jadwal_id,
+        real_inv_id,
+    };
+
+    if (jadwal.jdw_frekuensi === "Mingguan") {
+        duplicateWhere.real_week_number = weekNo;
+        duplicateWhere.real_tahun = tahun;
+    } else if (jadwal.jdw_frekuensi === "Bulanan") {
+        duplicateWhere.real_bulan = bulan;
+        duplicateWhere.real_tahun = tahun;
+    } else {
+        duplicateWhere.real_tgl = real_tgl;
+    }
+
+    const existingRealisasi = await Realisasi.findOne({
+        where: duplicateWhere,
+        attributes: ["real_id"],
+    });
+
+    if (existingRealisasi) {
+        const periodStr =
+            jadwal.jdw_frekuensi === "Mingguan"
+                ? "minggu"
+                : jadwal.jdw_frekuensi === "Bulanan"
+                  ? "bulan"
+                  : "tanggal";
+        return { error: `Realisasi untuk jadwal dan inventaris ini pada ${periodStr} yang sama sudah ada`, status: 409 };
+    }
+
+    return { success: true, weekNo, bulan, tahun };
+};
+
+// POST /realisasi/check-eligibility — cek kelayakan sebelum mengisi checklist
+const checkEligibility = async (req, res, next) => {
+    try {
+        const { real_jadwal_id, real_inv_id, real_tgl } = req.body;
+        
+        // Default ke hari ini jika real_tgl tidak dikirim dari frontend
+        const tgl = real_tgl || new Date().toISOString().split('T')[0];
+        
+        const valid = await validateRealisasiEligibility(real_jadwal_id, real_inv_id, tgl);
+        if (valid.error) {
+            return response.error(res, valid.error, valid.status);
+        }
+
+        return response.ok(res, { eligible: true });
+    } catch (err) {
+        next(err);
+    }
+};
+
 // POST /realisasi — buat realisasi baru (status Draft)
 const create = async (req, res, next) => {
     try {
@@ -372,213 +557,9 @@ const create = async (req, res, next) => {
             real_keterangan,
         } = req.body;
 
-        if (!real_jadwal_id || !real_inv_id || !real_tgl)
-            return response.error(
-                res,
-                "Jadwal, inventaris, dan tanggal wajib diisi",
-                400,
-            );
-
-        const tgl = new Date(real_tgl);
-        if (Number.isNaN(tgl.getTime())) {
-            return response.error(
-                res,
-                "Format tanggal realisasi tidak valid",
-                400,
-            );
-        }
-        const bulan = getMonthNumber(tgl);
-        const tahun = getYear(tgl);
-        const weekNo = getWeekNumberUtil(tgl);
-
-        const jadwal = await Jadwal.findByPk(real_jadwal_id, {
-            attributes: [
-                "jdw_id",
-                "jdw_frekuensi",
-                "jdw_gap_hari",
-                "jdw_week_number",
-                "jdw_bulan",
-                "jdw_tahun",
-                "jdw_tgl_mulai",
-                "jdw_tgl_selesai",
-                "jdw_jenis_id",
-                "jdw_pabrik_kode",
-                "jdw_status",
-            ],
-        });
-        if (!jadwal) return response.error(res, "Jadwal tidak ditemukan", 404);
-
-        if (!["Draft", "Aktif"].includes(jadwal.jdw_status)) {
-            return response.error(
-                res,
-                "Jadwal harus berstatus Draft/Aktif untuk realisasi",
-                400,
-            );
-        }
-
-        const realDate = new Date(real_tgl);
-        const startDate = new Date(jadwal.jdw_tgl_mulai);
-        const endDate = jadwal.jdw_tgl_selesai
-            ? new Date(jadwal.jdw_tgl_selesai)
-            : null;
-        if (
-            Number.isNaN(startDate.getTime()) ||
-            (endDate && Number.isNaN(endDate.getTime()))
-        ) {
-            return response.error(
-                res,
-                "Periode jadwal tidak valid, hubungi admin",
-                400,
-            );
-        }
-
-        realDate.setHours(0, 0, 0, 0);
-        startDate.setHours(0, 0, 0, 0);
-        if (endDate) endDate.setHours(0, 0, 0, 0);
-
-        if (realDate < startDate) {
-            return response.error(
-                res,
-                "Tanggal realisasi belum masuk periode jadwal",
-                400,
-            );
-        }
-        if (endDate && realDate > endDate) {
-            return response.error(
-                res,
-                "Tanggal realisasi melewati tanggal selesai jadwal",
-                400,
-            );
-        }
-
-        const inventaris = await Inventaris.findOne({
-            where: {
-                inv_id: real_inv_id,
-                inv_is_active: 1,
-            },
-            attributes: ["inv_id", "inv_jenis_id", "inv_pabrik_kode"],
-        });
-        if (!inventaris) {
-            return response.error(
-                res,
-                "Inventaris tidak ditemukan atau tidak aktif",
-                404,
-            );
-        }
-
-        if (Number(inventaris.inv_jenis_id) !== Number(jadwal.jdw_jenis_id)) {
-            return response.error(
-                res,
-                "Inventaris tidak sesuai dengan jenis pada jadwal",
-                400,
-            );
-        }
-
-        const jenis = await Jenis.findByPk(jadwal.jdw_jenis_id, {
-            attributes: ["jenis_id", "jenis_gap_hari"],
-        });
-        const gapHari = Number(jenis?.jenis_gap_hari || 0);
-        if (gapHari > 0) {
-            const lastSelesai = await Realisasi.findOne({
-                where: {
-                    real_inv_id: real_inv_id,
-                    real_status: "Selesai",
-                },
-                attributes: ["real_tgl"],
-                order: [["real_tgl", "DESC"]],
-            });
-
-            if (lastSelesai?.real_tgl) {
-                const lastDate = normalizeDateOnly(lastSelesai.real_tgl);
-                const currentDate = normalizeDateOnly(real_tgl);
-                if (lastDate && currentDate) {
-                    const nextEligibleDate = addDays(lastDate, gapHari);
-                    if (currentDate < nextEligibleDate) {
-                        return response.error(
-                            res,
-                            `Inventaris belum melewati gap realisasi ${gapHari} hari. Bisa direalisasikan lagi pada ${formatDateOnly(nextEligibleDate)}`,
-                            400,
-                        );
-                    }
-                }
-            }
-        }
-
-        // Gap realisasi level jadwal (khusus Mingguan/Bulanan), tidak berbasis inventaris.
-        const jadwalGapHari = Number(jadwal.jdw_gap_hari || 0);
-        if (
-            ["Mingguan", "Bulanan"].includes(jadwal.jdw_frekuensi) &&
-            jadwalGapHari > 0
-        ) {
-            const lastSelesaiJadwal = await Realisasi.findOne({
-                where: {
-                    real_jadwal_id,
-                    real_status: "Selesai",
-                },
-                attributes: ["real_tgl"],
-                order: [["real_tgl", "DESC"]],
-            });
-
-            if (lastSelesaiJadwal?.real_tgl) {
-                const lastDate = normalizeDateOnly(lastSelesaiJadwal.real_tgl);
-                const currentDate = normalizeDateOnly(real_tgl);
-                if (lastDate && currentDate) {
-                    const nextEligibleDate = addDays(lastDate, jadwalGapHari);
-                    if (currentDate < nextEligibleDate) {
-                        return response.error(
-                            res,
-                            `Jadwal ini memiliki gap realisasi ${jadwalGapHari} hari. Realisasi berikutnya dapat dilakukan pada ${formatDateOnly(nextEligibleDate)}`,
-                            400,
-                        );
-                    }
-                }
-            }
-        }
-
-        const allowedPabrikCodes = splitPabrikCodes(jadwal.jdw_pabrik_kode);
-        if (
-            allowedPabrikCodes.length > 0 &&
-            !allowedPabrikCodes.includes(String(inventaris.inv_pabrik_kode))
-        ) {
-            return response.error(
-                res,
-                "Inventaris tidak termasuk pabrik/lokasi jadwal",
-                400,
-            );
-        }
-
-        const duplicateWhere = {
-            real_jadwal_id,
-            real_inv_id,
-        };
-
-        if (jadwal.jdw_frekuensi === "Mingguan") {
-            duplicateWhere.real_week_number = weekNo;
-            duplicateWhere.real_tahun = tahun;
-        } else if (jadwal.jdw_frekuensi === "Bulanan") {
-            duplicateWhere.real_bulan = bulan;
-            duplicateWhere.real_tahun = tahun;
-        } else {
-            duplicateWhere.real_tgl = real_tgl;
-        }
-
-        const existingRealisasi = await Realisasi.findOne({
-            where: duplicateWhere,
-            attributes: ["real_id"],
-        });
-
-        if (existingRealisasi) {
-            const periodStr =
-                jadwal.jdw_frekuensi === "Mingguan"
-                    ? "minggu"
-                    : jadwal.jdw_frekuensi === "Bulanan"
-                      ? "bulan"
-                      : "tanggal";
-            return response.error(
-                res,
-                `Realisasi untuk jadwal dan inventaris ini pada ${periodStr} yang sama sudah ada`,
-                409,
-            );
+        const valid = await validateRealisasiEligibility(real_jadwal_id, real_inv_id, real_tgl);
+        if (valid.error) {
+            return response.error(res, valid.error, valid.status);
         }
 
         const payload = {
@@ -588,9 +569,9 @@ const create = async (req, res, next) => {
             real_tgl,
             real_jam_mulai,
             real_jam_selesai,
-            real_week_number: weekNo,
-            real_bulan: bulan,
-            real_tahun: tahun,
+            real_week_number: valid.weekNo,
+            real_bulan: valid.bulan,
+            real_tahun: valid.tahun,
             real_kondisi_akhir,
             real_keterangan,
             real_status: "Draft",
@@ -855,6 +836,7 @@ const uploadFoto = async (req, res, next) => {
 module.exports = {
     getAll,
     getOne,
+    checkEligibility,
     create,
     update,
     saveChecklist,

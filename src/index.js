@@ -51,7 +51,7 @@ const PORT = process.env.PORT;
 sequelize
     .authenticate()
     .then(() => {
-        console.log("Database terhubung.");
+        console.log(`Database terhubung ke: ${process.env.DB_HOST}`);
         app.listen(PORT, () =>
             console.log(`PlanKP API berjalan di port:${PORT}`),
         );

@@ -607,8 +607,9 @@ const getAll = async (req, res, next) => {
         }
 
         const isAdmin = req.user.user_jabatan === "admin";
-        const isUserRole =
-            String(req.user.user_jabatan || "").toLowerCase() === "user";
+        const isUserRole = ["user", "teknisi", "it_support"].includes(
+            String(req.user.user_jabatan || "").toLowerCase(),
+        );
         const userDivisi = getUserDivisiScope(req);
         if (isUserRole) {
             where.jdw_assigned_to = req.user.user_id;
@@ -903,9 +904,16 @@ const getOne = async (req, res, next) => {
                 return response.error(res, "Akses jadwal ditolak", 403);
             }
         }
+        const isUserRole = ["user", "teknisi", "it_support"].includes(
+            String(req.user.user_jabatan || "").toLowerCase(),
+        );
         if (!isAdmin) {
             const allowedDivisi = userDivisi;
-            if (
+            if (isUserRole) {
+                if (data.jdw_assigned_to !== req.user.user_id) {
+                    return response.error(res, "Akses jadwal ditolak", 403);
+                }
+            } else if (
                 data.jdw_divisi !== allowedDivisi &&
                 data.jdw_assigned_to !== req.user.user_id
             ) {
@@ -950,6 +958,7 @@ const getOne = async (req, res, next) => {
             const plain = inv.get({ plain: true });
             return {
                 ...plain,
+                inv_nama: plain.inv_no, // Menyamakan nilai inv_nama dengan inv_no
                 inv_jenis: jenisData?.jenis_nama || plain.inv_jenis_id,
                 inv_is_gap_eligible: true,
                 inv_next_eligible_date: null,

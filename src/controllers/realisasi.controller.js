@@ -118,10 +118,13 @@ const getAll = async (req, res, next) => {
         if (teknisi_id) where.real_teknisi_id = teknisi_id;
 
         const isAdmin = isAdminUser(req);
+        const isSelfOnly = isSelfOnlyRealisasiRole(req);
         const userDivisi =
             normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
 
-        if (!isAdmin) {
+        if (isSelfOnly) {
+            where.real_teknisi_id = req.user.user_id;
+        } else if (!isAdmin) {
             includeJadwal.where = { jdw_divisi: userDivisi };
         }
 

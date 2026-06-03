@@ -10,7 +10,7 @@ const {
     plan_user: User,
     sequelize,
 } = require("../models");
-const { QueryTypes } = require("sequelize");
+const { Op, QueryTypes } = require("sequelize");
 const response = require("../utils/response");
 const { normalizeDivisi } = require("../utils/divisi");
 const { parsePagination, buildMeta } = require("../utils/pagination");
@@ -152,7 +152,7 @@ const getAll = async (req, res, next) => {
                               // Admin hanya bisa melihat realisasi dari role user di divisi yang sama.
                               where: {
                                   user_divisi: userDivisi,
-                                  user_jabatan: "user",
+                                  user_jabatan: { [Op.in]: ["user", "teknisi", "it_support"] },
                               },
                           }
                         : {}),

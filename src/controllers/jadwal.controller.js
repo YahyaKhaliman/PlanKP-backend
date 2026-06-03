@@ -259,7 +259,7 @@ const getUserDivisiScope = (req) =>
     normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
 
 const buildAdminAssignedUserScope = (req) => ({
-    user_jabatan: "user",
+    user_jabatan: { [Op.in]: ["user", "teknisi", "it_support"] },
     user_divisi: getUserDivisiScope(req),
 });
 
@@ -958,7 +958,6 @@ const getOne = async (req, res, next) => {
             const plain = inv.get({ plain: true });
             return {
                 ...plain,
-                inv_nama: plain.inv_no, // Menyamakan nilai inv_nama dengan inv_no
                 inv_jenis: jenisData?.jenis_nama || plain.inv_jenis_id,
                 inv_is_gap_eligible: true,
                 inv_next_eligible_date: null,

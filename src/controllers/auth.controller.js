@@ -36,13 +36,14 @@ const register = async (req, res, next) => {
 
 const login = async (req, res, next) => {
     try {
-        const { user_nama, user_password } = req.body ?? {};
+        const { user_nama, user_password, app_version } = req.body ?? {};
         if (!user_nama || !user_password) {
             if (user_nama) {
                 await log_plankp.create({
                     user_nama: user_nama,
                     log_status: "GAGAL",
                     log_keterangan: "Password tidak diisi",
+                    log_versi: app_version || null,
                 });
             }
             return response.error(
@@ -62,6 +63,7 @@ const login = async (req, res, next) => {
                 user_nama: user_nama,
                 log_status: "GAGAL",
                 log_keterangan: result.message,
+                log_versi: app_version || null,
             });
             return response.error(res, result.message, result.status);
         }
@@ -70,6 +72,7 @@ const login = async (req, res, next) => {
             user_nama: user_nama,
             log_status: "BERHASIL",
             log_keterangan: "Login berhasil",
+            log_versi: app_version || null,
         });
         return response.ok(res, result.data, "Login berhasil");
     } catch (err) {

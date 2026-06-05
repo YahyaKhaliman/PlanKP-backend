@@ -24,16 +24,27 @@ const getAll = async (req, res, next) => {
         const where = {};
         if (jenis) where.inv_jenis_id = jenis;
         if (aktif !== undefined) where.inv_is_active = aktif === "true" ? 1 : 0;
-        if (q) where.inv_nama = { [Op.like]: `%${q}%` };
 
         const include = [];
-        if (req.adminScope) {
-            include.push({
+        if (req.adminScope || q) {
+            const jenisInclude = {
                 model: Jenis,
                 as: "jenis",
-                where: { jenis_kategori: req.adminScope },
-                attributes: [],
-            });
+                attributes: ["jenis_nama", "jenis_kategori"],
+            };
+            if (req.adminScope) {
+                jenisInclude.where = { jenis_kategori: req.adminScope };
+            }
+            include.push(jenisInclude);
+        }
+
+        if (q) {
+            where[Op.or] = [
+                { inv_nama: { [Op.like]: `%${q}%` } },
+                { inv_no: { [Op.like]: `%${q}%` } },
+                { inv_merk: { [Op.like]: `%${q}%` } },
+                { "$jenis.jenis_nama$": { [Op.like]: `%${q}%` } },
+            ];
         }
 
         const data = await Inventaris.findAll({

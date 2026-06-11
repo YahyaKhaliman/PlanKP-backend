@@ -4,7 +4,7 @@ const { verifyToken, allowOnly } = require("../middleware/auth");
 
 router.use(verifyToken);
 
-router.get("/jenis", allowOnly("admin"), jenis.getAll);
+router.get("/jenis", jenis.getAll);
 router.post("/jenis", allowOnly("admin"), jenis.create);
 router.put("/jenis/:id", allowOnly("admin"), jenis.update);
 router.delete("/jenis/:id", allowOnly("admin"), jenis.remove);

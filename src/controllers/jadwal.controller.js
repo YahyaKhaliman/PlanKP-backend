@@ -490,7 +490,6 @@ const buildPeriodeWhere = ({
     tahun,
     weekNumber,
     excludeJadwalId,
-    assignedTo,
 }) => {
     const where = {
         jdw_jenis_id: Number(jenisId),
@@ -498,10 +497,6 @@ const buildPeriodeWhere = ({
         jdw_frekuensi: frekuensi,
         jdw_status: { [Op.notIn]: ["Selesai", "Dibatalkan"] },
     };
-
-    if (assignedTo !== undefined) {
-        where.jdw_assigned_to = assignedTo;
-    }
 
     if (frekuensi === "Harian") {
         where.jdw_tgl_mulai = tglMulai;
@@ -1149,7 +1144,6 @@ const create = async (req, res, next) => {
                 bulan,
                 tahun,
                 weekNumber: weekNo,
-                assignedTo: jdw_assigned_to || null,
             }),
             attributes: ["jdw_id", "jdw_pabrik_kode"],
         });
@@ -1361,7 +1355,6 @@ const update = async (req, res, next) => {
                 tahun: data.jdw_tahun,
                 weekNumber: data.jdw_week_number,
                 excludeJadwalId: data.jdw_id,
-                assignedTo: data.jdw_assigned_to || null,
             }),
             attributes: ["jdw_id", "jdw_pabrik_kode"],
         });

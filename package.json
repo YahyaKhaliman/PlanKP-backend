@@ -6,7 +6,9 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "seed": "node seeders/seed_plan_user.js && node seeders/seed_plan_jenis.js && node seeders/seed_plan_inventaris.js && node seeders/seed_plan_jadwal.js && node seeders/seed_checklist_template.js && node seeders/seed_plan_realisasi.js && node seeders/seed_plan_hasil_checklist.js"
+    "db:sync": "node seeders/sync.js",
+    "seed": "node seeders/seed_plan_user.js && node seeders/seed_plan_jenis.js && node seeders/seed_plan_inventaris.js && node seeders/seed_plan_jadwal.js && node seeders/seed_checklist_template.js && node seeders/seed_plan_realisasi.js && node seeders/seed_plan_hasil_checklist.js",
+    "db:init": "npm run db:sync && npm run seed"
   },
   "keywords": [],
   "author": "",

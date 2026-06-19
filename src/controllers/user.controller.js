@@ -3,7 +3,7 @@ const { Op } = require("sequelize");
 const response = require("../utils/response");
 const { normalizeDivisi } = require("../utils/divisi");
 
-const ALLOWED_JABATAN = ["admin", "user"];
+const ALLOWED_JABATAN = ["admin", "user", "manager", "teknisi", "it_support"];
 
 // GET /users?jabatan=&divisi=&q=
 const getAll = async (req, res, next) => {
@@ -134,15 +134,18 @@ const update = async (req, res, next) => {
             data.user_nik = user_nik;
         }
         if (user_password) {
-            if (!user_password_lama) {
-                return response.error(
-                    res,
-                    "Password lama wajib diisi untuk mengubah password",
-                    400,
-                );
-            }
-            if (data.user_password !== user_password_lama) {
-                return response.error(res, "Password lama salah", 400);
+            const isEditingSelf = Number(req.user.user_id) === Number(data.user_id);
+            if (isEditingSelf) {
+                if (!user_password_lama) {
+                    return response.error(
+                        res,
+                        "Password lama wajib diisi untuk mengubah password Anda sendiri",
+                        400,
+                    );
+                }
+                if (data.user_password !== user_password_lama) {
+                    return response.error(res, "Password lama salah", 400);
+                }
             }
             data.user_password = await User.hashPassword(user_password);
         }

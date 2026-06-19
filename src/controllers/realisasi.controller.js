@@ -23,6 +23,9 @@ const {
 const isAdminUser = (req) =>
     String(req.user?.user_jabatan || "").toLowerCase() === "admin";
 
+const isManagerUser = (req) =>
+    String(req.user?.user_jabatan || "").toLowerCase() === "manager";
+
 const isSelfOnlyRealisasiRole = (req) => {
     const role = String(req.user?.user_jabatan || "").toLowerCase();
     return ["user", "teknisi", "it_support"].includes(role);
@@ -30,7 +33,7 @@ const isSelfOnlyRealisasiRole = (req) => {
 
 const splitPabrikCodes = (value) => {
     if (!value) return [];
-    const raw = Array.isArray(value) ? value : String(value).split(/[;,]/);
+    const raw = Array.isArray(value) ? value : String(value).split(",");
     return raw
         .map((code) => String(code).trim())
         .filter((code) => code.length > 0);
@@ -88,7 +91,6 @@ const serializeRealisasi = (item) => {
     return plain;
 };
 
-// GET /realisasi?jadwal_id=1&status=Draft&bulan=3&tahun=2025
 const getAll = async (req, res, next) => {
     try {
         const { jadwal_id, status, bulan, tahun, teknisi_id, by_divisi } =
@@ -118,13 +120,14 @@ const getAll = async (req, res, next) => {
         if (teknisi_id) where.real_teknisi_id = teknisi_id;
 
         const isAdmin = isAdminUser(req);
+        const isManager = isManagerUser(req);
         const isSelfOnly = isSelfOnlyRealisasiRole(req);
         const userDivisi =
             normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
 
         if (isSelfOnly) {
             where.real_teknisi_id = req.user.user_id;
-        } else if (!isAdmin) {
+        } else if (!isAdmin && !isManager) {
             includeJadwal.where = { jdw_divisi: userDivisi };
         }
 
@@ -147,12 +150,19 @@ const getAll = async (req, res, next) => {
                     model: User,
                     as: "real_teknisi",
                     attributes: ["user_id", "user_nama"],
-                    ...(isAdmin
+                    ...(isAdmin || isManager
                         ? {
-                              // Admin hanya bisa melihat realisasi dari role user di divisi yang sama.
                               where: {
-                                  user_divisi: userDivisi,
-                                  user_jabatan: { [Op.in]: ["user", "teknisi", "it_support"] },
+                                  ...(isAdmin
+                                      ? { user_divisi: userDivisi }
+                                      : {}),
+                                  user_jabatan: {
+                                      [Op.in]: [
+                                          "user",
+                                          "teknisi",
+                                          "it_support",
+                                      ],
+                                  },
                               },
                           }
                         : {}),
@@ -244,7 +254,9 @@ const getOne = async (req, res, next) => {
         if (!row) return response.error(res, "Realisasi tidak ditemukan", 404);
 
         const isAdmin = isAdminUser(req);
-        const selfOnlyScope = !isAdmin && isSelfOnlyRealisasiRole(req);
+        const isManager = isManagerUser(req);
+        const selfOnlyScope =
+            !isAdmin && !isManager && isSelfOnlyRealisasiRole(req);
         const userDivisi =
             normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
         if (selfOnlyScope) {
@@ -255,7 +267,7 @@ const getOne = async (req, res, next) => {
                     403,
                 );
             }
-        } else if (isAdmin) {
+        } else if (isAdmin || isManager) {
             const teknisi = await User.findByPk(row.real_teknisi_id, {
                 attributes: ["user_id", "user_divisi", "user_jabatan"],
             });
@@ -266,7 +278,8 @@ const getOne = async (req, res, next) => {
                 teknisi?.user_jabatan || "",
             ).toLowerCase();
 
-            if (teknisiJabatan !== "user") {
+            const allowedRoles = ["user", "teknisi", "it_support"];
+            if (!allowedRoles.includes(teknisiJabatan)) {
                 return response.error(
                     res,
                     "Akses detail realisasi ditolak",
@@ -274,14 +287,14 @@ const getOne = async (req, res, next) => {
                 );
             }
 
-            if (teknisiDivisi && teknisiDivisi !== userDivisi) {
+            if (isAdmin && teknisiDivisi && teknisiDivisi !== userDivisi) {
                 return response.error(
                     res,
                     "Akses detail realisasi ditolak",
                     403,
                 );
             }
-        } else if (!isAdmin) {
+        } else if (!isAdmin && !isManager) {
             if (row.jdw_divisi && row.jdw_divisi !== userDivisi) {
                 return response.error(
                     res,
@@ -363,9 +376,16 @@ const getOne = async (req, res, next) => {
 };
 
 // Helper function untuk validasi kelayakan realisasi
-const validateRealisasiEligibility = async (real_jadwal_id, real_inv_id, real_tgl) => {
+const validateRealisasiEligibility = async (
+    real_jadwal_id,
+    real_inv_id,
+    real_tgl,
+) => {
     if (!real_jadwal_id || !real_inv_id || !real_tgl)
-        return { error: "Jadwal, inventaris, dan tanggal wajib diisi", status: 400 };
+        return {
+            error: "Jadwal, inventaris, dan tanggal wajib diisi",
+            status: 400,
+        };
 
     const tgl = new Date(real_tgl);
     if (Number.isNaN(tgl.getTime())) {
@@ -392,8 +412,11 @@ const validateRealisasiEligibility = async (real_jadwal_id, real_inv_id, real_tg
     });
     if (!jadwal) return { error: "Jadwal tidak ditemukan", status: 404 };
 
-    if (!["Draft", "Aktif"].includes(jadwal.jdw_status)) {
-        return { error: "Jadwal harus berstatus Draft/Aktif untuk realisasi", status: 400 };
+    if (jadwal.jdw_status !== "Draft") {
+        return {
+            error: "Jadwal harus berstatus Draft untuk realisasi",
+            status: 400,
+        };
     }
 
     const realDate = new Date(real_tgl);
@@ -405,7 +428,10 @@ const validateRealisasiEligibility = async (real_jadwal_id, real_inv_id, real_tg
         Number.isNaN(startDate.getTime()) ||
         (endDate && Number.isNaN(endDate.getTime()))
     ) {
-        return { error: "Periode jadwal tidak valid, hubungi admin", status: 400 };
+        return {
+            error: "Periode jadwal tidak valid, hubungi admin",
+            status: 400,
+        };
     }
 
     realDate.setHours(0, 0, 0, 0);
@@ -413,10 +439,16 @@ const validateRealisasiEligibility = async (real_jadwal_id, real_inv_id, real_tg
     if (endDate) endDate.setHours(0, 0, 0, 0);
 
     if (realDate < startDate) {
-        return { error: "Tanggal realisasi belum masuk periode jadwal", status: 400 };
+        return {
+            error: "Tanggal realisasi belum masuk periode jadwal",
+            status: 400,
+        };
     }
     if (endDate && realDate > endDate) {
-        return { error: "Tanggal realisasi melewati tanggal selesai jadwal", status: 400 };
+        return {
+            error: "Tanggal realisasi melewati tanggal selesai jadwal",
+            status: 400,
+        };
     }
 
     const inventaris = await Inventaris.findOne({
@@ -427,16 +459,26 @@ const validateRealisasiEligibility = async (real_jadwal_id, real_inv_id, real_tg
         attributes: ["inv_id", "inv_jenis_id", "inv_pabrik_kode"],
     });
     if (!inventaris) {
-        return { error: "Inventaris tidak ditemukan atau tidak aktif", status: 404 };
+        return {
+            error: "Inventaris tidak ditemukan atau tidak aktif",
+            status: 404,
+        };
     }
 
     if (Number(inventaris.inv_jenis_id) !== Number(jadwal.jdw_jenis_id)) {
-        return { error: "Inventaris tidak sesuai dengan jenis pada jadwal", status: 400 };
+        return {
+            error: "Inventaris tidak sesuai dengan jenis pada jadwal",
+            status: 400,
+        };
     }
 
     const jenis = await Jenis.findByPk(jadwal.jdw_jenis_id, {
         attributes: ["jenis_id", "jenis_gap_hari"],
     });
+    // Gap level JENIS (per unit inventaris): mencegah unit yang sama di-service
+    // terlalu sering, terlepas dari jadwal mana.
+    // Contoh: jenis_gap_hari=7 berarti setelah unit X di-service,
+    // harus menunggu 7 hari sebelum unit X bisa di-service lagi.
     const gapHari = Number(jenis?.jenis_gap_hari || 0);
     if (gapHari > 0) {
         const lastSelesai = await Realisasi.findOne({
@@ -454,13 +496,18 @@ const validateRealisasiEligibility = async (real_jadwal_id, real_inv_id, real_tg
             if (lastDate && currentDate) {
                 const nextEligibleDate = addDays(lastDate, gapHari);
                 if (currentDate < nextEligibleDate) {
-                    return { error: `Inventaris belum melewati gap realisasi ${gapHari} hari. Bisa direalisasikan lagi pada ${formatDateOnly(nextEligibleDate)}`, status: 400 };
+                    return {
+                        error: `Inventaris belum melewati gap realisasi ${gapHari} hari. Bisa direalisasikan lagi pada ${formatDateOnly(nextEligibleDate)}`,
+                        status: 400,
+                    };
                 }
             }
         }
     }
 
-    // Gap realisasi level jadwal (khusus Mingguan/Bulanan), tidak berbasis inventaris.
+    // Gap level JADWAL (per jadwal, bukan per inventaris):
+    // Mencegah realisasi pada jadwal ini terlalu sering,
+    // terlepas dari unit inventaris mana yang dikerjakan.
     const jadwalGapHari = Number(jadwal.jdw_gap_hari || 0);
     if (
         ["Mingguan", "Bulanan"].includes(jadwal.jdw_frekuensi) &&
@@ -481,7 +528,10 @@ const validateRealisasiEligibility = async (real_jadwal_id, real_inv_id, real_tg
             if (lastDate && currentDate) {
                 const nextEligibleDate = addDays(lastDate, jadwalGapHari);
                 if (currentDate < nextEligibleDate) {
-                    return { error: `Jadwal ini memiliki gap realisasi ${jadwalGapHari} hari. Realisasi berikutnya dapat dilakukan pada ${formatDateOnly(nextEligibleDate)}`, status: 400 };
+                    return {
+                        error: `Jadwal ini memiliki gap realisasi ${jadwalGapHari} hari. Realisasi berikutnya dapat dilakukan pada ${formatDateOnly(nextEligibleDate)}`,
+                        status: 400,
+                    };
                 }
             }
         }
@@ -492,7 +542,10 @@ const validateRealisasiEligibility = async (real_jadwal_id, real_inv_id, real_tg
         allowedPabrikCodes.length > 0 &&
         !allowedPabrikCodes.includes(String(inventaris.inv_pabrik_kode))
     ) {
-        return { error: "Inventaris tidak termasuk pabrik/lokasi jadwal", status: 400 };
+        return {
+            error: "Inventaris tidak termasuk pabrik/lokasi jadwal",
+            status: 400,
+        };
     }
 
     const duplicateWhere = {
@@ -522,7 +575,10 @@ const validateRealisasiEligibility = async (real_jadwal_id, real_inv_id, real_tg
                 : jadwal.jdw_frekuensi === "Bulanan"
                   ? "bulan"
                   : "tanggal";
-        return { error: `Realisasi untuk jadwal dan inventaris ini pada ${periodStr} yang sama sudah ada`, status: 409 };
+        return {
+            error: `Realisasi untuk jadwal dan inventaris ini pada ${periodStr} yang sama sudah ada`,
+            status: 409,
+        };
     }
 
     return { success: true, weekNo, bulan, tahun };
@@ -532,11 +588,15 @@ const validateRealisasiEligibility = async (real_jadwal_id, real_inv_id, real_tg
 const checkEligibility = async (req, res, next) => {
     try {
         const { real_jadwal_id, real_inv_id, real_tgl } = req.body;
-        
+
         // Default ke hari ini jika real_tgl tidak dikirim dari frontend
-        const tgl = real_tgl || new Date().toISOString().split('T')[0];
-        
-        const valid = await validateRealisasiEligibility(real_jadwal_id, real_inv_id, tgl);
+        const tgl = real_tgl || new Date().toISOString().split("T")[0];
+
+        const valid = await validateRealisasiEligibility(
+            real_jadwal_id,
+            real_inv_id,
+            tgl,
+        );
         if (valid.error) {
             return response.error(res, valid.error, valid.status);
         }
@@ -560,7 +620,11 @@ const create = async (req, res, next) => {
             real_keterangan,
         } = req.body;
 
-        const valid = await validateRealisasiEligibility(real_jadwal_id, real_inv_id, real_tgl);
+        const valid = await validateRealisasiEligibility(
+            real_jadwal_id,
+            real_inv_id,
+            real_tgl,
+        );
         if (valid.error) {
             return response.error(res, valid.error, valid.status);
         }

@@ -11,8 +11,8 @@ router.get("/jadwal", jadwal.getAll);
 router.get("/jadwal/divisi", jadwal.getByDivisi);
 router.get("/jadwal/assigned", jadwal.getByUser);
 router.get("/jadwal/:id", jadwal.getOne);
-router.post("/jadwal", allowOnly("admin"), jadwal.create);
-router.put("/jadwal/:id", allowOnly("admin"), jadwal.update);
-router.patch("/jadwal/:id/status", allowOnly("admin"), jadwal.updateStatus);
+router.post("/jadwal", allowOnly("admin", "manager"), jadwal.create);
+router.put("/jadwal/:id", allowOnly("admin", "manager"), jadwal.update);
+router.patch("/jadwal/:id/status", allowOnly("admin", "manager"), jadwal.updateStatus);
 
 module.exports = router;

@@ -1,5 +1,5 @@
 const router = require("express").Router();
-const { verifyToken } = require("../middleware/auth");
+const { verifyToken, allowOnly } = require("../middleware/auth");
 const system = require("../controllers/system.controller");
 
 // Route publik (tidak perlu token)

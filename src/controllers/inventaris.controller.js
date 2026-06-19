@@ -25,18 +25,14 @@ const getAll = async (req, res, next) => {
         if (jenis) where.inv_jenis_id = jenis;
         if (aktif !== undefined) where.inv_is_active = aktif === "true" ? 1 : 0;
 
-        const include = [];
-        if (req.adminScope || q) {
-            const jenisInclude = {
+        const include = [
+            {
                 model: Jenis,
                 as: "jenis",
                 attributes: ["jenis_nama", "jenis_kategori"],
-            };
-            if (req.adminScope) {
-                jenisInclude.where = { jenis_kategori: req.adminScope };
-            }
-            include.push(jenisInclude);
-        }
+                where: req.adminScope ? { jenis_kategori: req.adminScope } : undefined,
+            },
+        ];
 
         if (q) {
             where[Op.or] = [
@@ -52,7 +48,10 @@ const getAll = async (req, res, next) => {
             include,
             order: [["inv_nama", "ASC"]],
         });
-        return response.ok(res, data);
+        return response.okList(res, data, {
+            total: data.length,
+            itemCount: data.length,
+        });
     } catch (err) {
         next(err);
     }

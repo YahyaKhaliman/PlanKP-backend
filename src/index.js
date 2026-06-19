@@ -1,4 +1,5 @@
 require("dotenv").config();
+process.env.TZ = process.env.TZ || "Asia/Jakarta";
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
@@ -15,6 +16,7 @@ const realisasiRoutes = require("./routes/realisasi.route");
 const jenisRoutes = require("./routes/jenis.route");
 const systemRoutes = require("./routes/system.route");
 const systemController = require("./controllers/system.controller");
+const monitoringDivisiRoutes = require("./routes/monitoringDivisi.route");
 
 const app = express();
 
@@ -42,6 +44,7 @@ app.use("/api/master", realisasiRoutes);
 app.use("/api/master", jadwalRoutes);
 app.use("/api/master", jenisRoutes);
 app.use("/api/master", systemRoutes);
+app.use("/api/master", monitoringDivisiRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

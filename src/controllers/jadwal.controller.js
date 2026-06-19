@@ -1,3 +1,6 @@
+// Pastikan timezone Node.js selaras dengan MySQL timezone (+07:00)
+process.env.TZ = process.env.TZ || "Asia/Jakarta";
+
 const {
     plan_jadwal: Jadwal,
     plan_user: User,
@@ -35,7 +38,7 @@ const resolveJadwalSort = (sortBy, orderBy) => {
 
 const splitPabrikCodes = (value) => {
     if (!value) return [];
-    const raw = Array.isArray(value) ? value : String(value).split(/[;,]/);
+    const raw = Array.isArray(value) ? value : String(value).split(",");
     const unique = new Set();
     raw.forEach((code) => {
         const cleaned = String(code).trim();
@@ -71,11 +74,7 @@ const serializeJadwal = (item) => {
     return plain;
 };
 
-const serializeInventaris = (item) => {
-    const plain = item.get({ plain: true });
-    plain.inv_jenis = plain.inv_jenis_id;
-    return plain;
-};
+
 
 const jenisHasActiveInventaris = async (jenisId) => {
     const normalizedJenisId = Number(jenisId);
@@ -149,6 +148,11 @@ const buildComputedAttributes = () => {
                 FROM plan_inventaris i
                 WHERE i.inv_jenis_id = plan_jadwal.jdw_jenis_id
                   AND i.inv_is_active = 1
+                  AND (
+                    plan_jadwal.jdw_pabrik_kode IS NULL 
+                    OR TRIM(plan_jadwal.jdw_pabrik_kode) = '' 
+                    OR FIND_IN_SET(i.inv_pabrik_kode, plan_jadwal.jdw_pabrik_kode) > 0
+                  )
             )`),
             "jdw_total_unit",
         ],
@@ -607,13 +611,14 @@ const getAll = async (req, res, next) => {
         }
 
         const isAdmin = req.user.user_jabatan === "admin";
+        const isManager = req.user.user_jabatan === "manager";
         const isUserRole = ["user", "teknisi", "it_support"].includes(
             String(req.user.user_jabatan || "").toLowerCase(),
         );
         const userDivisi = getUserDivisiScope(req);
         if (isUserRole) {
             where.jdw_assigned_to = req.user.user_id;
-        } else if (!isAdmin) {
+        } else if (!isAdmin && !isManager) {
             where[Op.and] = where[Op.and] || [];
             where[Op.and].push({
                 [Op.or]: [
@@ -880,6 +885,7 @@ const getOne = async (req, res, next) => {
         if (!data) return response.error(res, "Jadwal tidak ditemukan", 404);
 
         const isAdmin = req.user.user_jabatan === "admin";
+        const isManager = req.user.user_jabatan === "manager";
         const userDivisi = getUserDivisiScope(req);
         const assignedUser = data.jdw_assigned_to_plan_user;
         if (req.adminScope && data.jdw_divisi !== req.adminScope) {
@@ -907,7 +913,7 @@ const getOne = async (req, res, next) => {
         const isUserRole = ["user", "teknisi", "it_support"].includes(
             String(req.user.user_jabatan || "").toLowerCase(),
         );
-        if (!isAdmin) {
+        if (!isAdmin && !isManager) {
             const allowedDivisi = userDivisi;
             if (isUserRole) {
                 if (data.jdw_assigned_to !== req.user.user_id) {
@@ -1024,7 +1030,7 @@ const getOne = async (req, res, next) => {
 
         return response.ok(res, {
             jadwal: jadwalPayload,
-            inventaris: eligibleInventaris,
+            inventaris: inventoryWithGap,
             inventaris_non_eligible: nonEligibleInventaris,
         });
     } catch (err) {
@@ -1087,6 +1093,10 @@ const create = async (req, res, next) => {
                 400,
             );
 
+        // jdw_gap_hari: gap antar-realisasi pada level JADWAL (dalam hari).
+        // Berbeda dari jenis_gap_hari (di plan_jenis) yang mengatur gap per UNIT INVENTARIS.
+        // Contoh: jdw_gap_hari=3 berarti setelah realisasi terakhir di jadwal ini,
+        // harus menunggu 3 hari sebelum bisa realisasi berikutnya (apapun unit-nya).
         let parsedGapHari = 0;
         if (["Mingguan", "Bulanan"].includes(jdw_frekuensi)) {
             parsedGapHari = Number(jdw_gap_hari ?? 0);

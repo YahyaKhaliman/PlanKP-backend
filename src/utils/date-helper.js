@@ -1,8 +1,3 @@
-/**
- * Date Helper Utilities
- * Consistency untuk perhitungan week number, bulan, tahun di FE dan BE
- */
-
 const getWeekNumber = (date) => {
     const d = new Date(
         Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()),
@@ -20,22 +15,6 @@ const getMonthNumber = (date) => {
 
 const getYear = (date) => {
     return date.getFullYear();
-};
-
-const getDateComponents = (dateString) => {
-    const date = new Date(dateString);
-    return {
-        weekNumber: getWeekNumber(date),
-        month: getMonthNumber(date),
-        year: getYear(date),
-        dateObj: date,
-    };
-};
-
-const calculateDaysDifference = (date1Str, date2Str) => {
-    const d1 = new Date(date1Str);
-    const d2 = new Date(date2Str);
-    return Math.floor((d2 - d1) / (1000 * 60 * 60 * 24));
 };
 
 const normalizeDateOnly = (value) => {
@@ -198,8 +177,6 @@ module.exports = {
     getWeekNumber,
     getMonthNumber,
     getYear,
-    getDateComponents,
-    calculateDaysDifference,
     normalizeDateOnly,
     formatDateOnly,
     addByFrequency,

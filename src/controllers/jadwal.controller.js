@@ -22,6 +22,8 @@ const {
     formatDateOnly,
 } = require("../utils/date-helper");
 
+const { is6DaysDivisi } = require("./system.controller");
+
 const resolveJadwalSort = (sortBy, orderBy) => {
     const allowedSort = [
         "jdw_tgl_mulai",
@@ -73,8 +75,6 @@ const serializeJadwal = (item) => {
 
     return plain;
 };
-
-
 
 const jenisHasActiveInventaris = async (jenisId) => {
     const normalizedJenisId = Number(jenisId);
@@ -419,6 +419,7 @@ const getHariLibur = async (req, res, next) => {
         const now = new Date();
         const year = Number(req.query.year || now.getFullYear());
         const month = Number(req.query.month || now.getMonth() + 1);
+        const divisi = req.query.divisi || req.user?.user_divisi || null;
 
         if (!Number.isInteger(year) || year < 1900 || year > 3000) {
             return response.error(res, "Parameter year tidak valid", 400);
@@ -427,58 +428,78 @@ const getHariLibur = async (req, res, next) => {
             return response.error(res, "Parameter month tidak valid", 400);
         }
 
+        const unique = new Map();
         const dateColumn = await resolveHariLiburDateColumn();
-        if (!dateColumn) {
-            return response.okList(res, [], {
-                total: 0,
-                itemCount: 0,
+
+        if (dateColumn) {
+            const descColumn = await resolveHariLiburDescColumn();
+            const fullTableName = `${escapeIdentifier(HARI_LIBUR_SCHEMA)}.${escapeIdentifier(HARI_LIBUR_TABLE)}`;
+            const dateColumnName = escapeIdentifier(dateColumn);
+            const descColumnSelect = descColumn
+                ? `${escapeIdentifier(descColumn)} AS keterangan`
+                : "NULL AS keterangan";
+
+            const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+            const monthEndDate = new Date(year, month, 0);
+            const monthEnd = `${monthEndDate.getFullYear()}-${String(monthEndDate.getMonth() + 1).padStart(2, "0")}-${String(monthEndDate.getDate()).padStart(2, "0")}`;
+
+            const rows = await sequelize.query(
+                `
+                SELECT
+                    DATE_FORMAT(DATE(${dateColumnName}), '%Y-%m-%d') AS tanggal,
+                    ${descColumnSelect}
+                FROM ${fullTableName}
+                WHERE DATE(${dateColumnName}) BETWEEN :monthStart AND :monthEnd
+                ORDER BY DATE(${dateColumnName}) ASC
+                `,
+                {
+                    replacements: { monthStart, monthEnd },
+                    type: QueryTypes.SELECT,
+                },
+            );
+
+            rows.forEach((row) => {
+                const tanggal = String(row.tanggal || "");
+                if (!tanggal) return;
+                if (!unique.has(tanggal)) {
+                    unique.set(tanggal, {
+                        tanggal,
+                        keterangan:
+                            row.keterangan || "Libur Nasional / Perusahaan",
+                    });
+                }
             });
         }
 
-        const descColumn = await resolveHariLiburDescColumn();
-        const fullTableName = `${escapeIdentifier(HARI_LIBUR_SCHEMA)}.${escapeIdentifier(HARI_LIBUR_TABLE)}`;
-        const dateColumnName = escapeIdentifier(dateColumn);
-        const descColumnSelect = descColumn
-            ? `${escapeIdentifier(descColumn)} AS keterangan`
-            : "NULL AS keterangan";
-
-        const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-        const monthEndDate = new Date(year, month, 0);
-        const monthEnd = `${monthEndDate.getFullYear()}-${String(monthEndDate.getMonth() + 1).padStart(2, "0")}-${String(monthEndDate.getDate()).padStart(2, "0")}`;
-
-        const rows = await sequelize.query(
-            `
-            SELECT
-                DATE_FORMAT(DATE(${dateColumnName}), '%Y-%m-%d') AS tanggal,
-                ${descColumnSelect}
-            FROM ${fullTableName}
-            WHERE DATE(${dateColumnName}) BETWEEN :monthStart AND :monthEnd
-            ORDER BY DATE(${dateColumnName}) ASC
-            `,
-            {
-                replacements: { monthStart, monthEnd },
-                type: QueryTypes.SELECT,
-            },
-        );
-
-        const unique = new Map();
-        rows.forEach((row) => {
-            const tanggal = String(row.tanggal || "");
-            if (!tanggal) return;
-            if (!unique.has(tanggal)) {
-                unique.set(tanggal, {
-                    tanggal,
-                    keterangan: row.keterangan || null,
-                });
+        // Jika divisi BUKAN divisi 6 hari kerja (misal 5 hari kerja atau default),
+        // sertakan semua hari Sabtu di bulan tersebut sebagai hari libur
+        if (!is6DaysDivisi(divisi)) {
+            const monthEndDate = new Date(year, month, 0);
+            const totalDays = monthEndDate.getDate();
+            for (let d = 1; d <= totalDays; d++) {
+                const dt = new Date(year, month - 1, d);
+                if (dt.getDay() === 6) {
+                    // Sabtu
+                    const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+                    if (!unique.has(dateStr)) {
+                        unique.set(dateStr, {
+                            tanggal: dateStr,
+                            keterangan: "Libur Efisiensi (Sabtu)",
+                        });
+                    }
+                }
             }
-        });
+        }
 
         const items = Array.from(unique.values());
+        items.sort((a, b) => a.tanggal.localeCompare(b.tanggal));
+
         return response.okList(res, items, {
             total: items.length,
             itemCount: items.length,
             year,
             month,
+            divisi: divisi || null,
         });
     } catch (err) {
         next(err);
@@ -899,13 +920,9 @@ const getOne = async (req, res, next) => {
             const assignedRole = String(
                 assignedUser?.user_jabatan || "",
             ).toLowerCase();
-            const assignedDivisi =
-                normalizeDivisi(assignedUser?.user_divisi) ||
-                assignedUser?.user_divisi;
             if (
                 !assignedUser ||
-                assignedRole !== "user" ||
-                assignedDivisi !== userDivisi
+                !["user", "teknisi", "it_support"].includes(assignedRole)
             ) {
                 return response.error(res, "Akses jadwal ditolak", 403);
             }

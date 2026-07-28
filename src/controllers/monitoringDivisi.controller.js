@@ -86,6 +86,7 @@ const getMonitoringDivisi = async (req, res, next) => {
                 attributes: [
                     "jdw_id",
                     "jdw_judul",
+                    "jdw_divisi",
                     "jdw_jenis_id",
                     "jdw_frekuensi",
                     "jdw_target",

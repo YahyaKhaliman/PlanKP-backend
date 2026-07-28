@@ -19,6 +19,7 @@ const systemController = require("./controllers/system.controller");
 const monitoringDivisiRoutes = require("./routes/monitoringDivisi.route");
 
 const app = express();
+app.disable("etag"); // memaksa server mengirim data 200 beserta payload data json lengkap
 
 app.use(
     cors({ origin: "*", methods: ["GET", "POST", "PUT", "PATCH", "DELETE"] }),
@@ -27,7 +28,6 @@ app.use(logger);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use("/public", express.static(path.join(__dirname, "../public")));
-
 
 app.get("/api/health", (req, res) =>
     res.json({ success: true, message: "PlanKP API running" }),

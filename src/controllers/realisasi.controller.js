@@ -59,6 +59,14 @@ const formatDateOnly = (date) => {
     return `${y}-${m}-${d}`;
 };
 
+const formatDateDisplay = (date) => {
+    if (!date) return "";
+    const d = String(date.getDate()).padStart(2, "0");
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const y = date.getFullYear();
+    return `${d}-${m}-${y}`;
+};
+
 const resolveRealisasiSort = (sortBy, orderBy) => {
     const allowedSort = [
         "real_tgl",
@@ -73,28 +81,44 @@ const resolveRealisasiSort = (sortBy, orderBy) => {
 };
 
 const serializeChecklist = (item) => {
-    const plain = item.get({ plain: true });
+    if (!item) return null;
+    const plain =
+        typeof item.get === "function"
+            ? item.get({ plain: true })
+            : { ...item };
     plain.template_item = plain.hc_ct || null;
     return plain;
 };
 
 const serializeRealisasi = (item) => {
-    const plain = item.get({ plain: true });
+    if (!item) return null;
+    const plain =
+        typeof item.get === "function"
+            ? item.get({ plain: true })
+            : { ...item };
     plain.jadwal = plain.real_jadwal || null;
     plain.inventaris = plain.real_inv || null;
     plain.teknisi = plain.real_teknisi || null;
     if (Array.isArray(plain.plan_hasil_checklists)) {
         plain.hasil_checklist = plain.plan_hasil_checklists
             .map(serializeChecklist)
-            .sort((left, right) => left.hc_ct_id - right.hc_ct_id);
+            .filter((c) => c !== null)
+            .sort((left, right) => (left.hc_ct_id || 0) - (right.hc_ct_id || 0));
     }
     return plain;
 };
 
 const getAll = async (req, res, next) => {
     try {
-        const { jadwal_id, status, bulan, tahun, teknisi_id, by_divisi } =
-            req.query;
+        const {
+            jadwal_id,
+            status,
+            bulan,
+            tahun,
+            teknisi_id,
+            by_divisi,
+            divisi,
+        } = req.query;
         const { hasPagination, limit, offset } = parsePagination(req.query);
         const order = resolveRealisasiSort(req.query.sort, req.query.order);
         const where = {};
@@ -125,10 +149,25 @@ const getAll = async (req, res, next) => {
         const userDivisi =
             normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
 
-        if (isSelfOnly) {
+        if (isSelfOnly && !jadwal_id) {
             where.real_teknisi_id = req.user.user_id;
+        }
+
+        let targetDivisi = null;
+        if (divisi && String(divisi).toLowerCase() !== "true" && String(divisi).toLowerCase() !== "false") {
+            targetDivisi = divisi;
+        } else if (by_divisi) {
+            if (String(by_divisi).toLowerCase() === "true") {
+                targetDivisi = userDivisi;
+            } else if (String(by_divisi).toLowerCase() !== "false") {
+                targetDivisi = by_divisi;
+            }
         } else if (!isAdmin && !isManager) {
-            includeJadwal.where = { jdw_divisi: userDivisi };
+            targetDivisi = userDivisi;
+        }
+
+        if (targetDivisi) {
+            includeJadwal.where = { jdw_divisi: targetDivisi };
         }
 
         const queryOptions = {
@@ -142,6 +181,7 @@ const getAll = async (req, res, next) => {
                         "inv_id",
                         "inv_no",
                         "inv_nama",
+                        "inv_serial_number",
                         "inv_pabrik_kode",
                         "inv_pic",
                     ],
@@ -149,23 +189,28 @@ const getAll = async (req, res, next) => {
                 {
                     model: User,
                     as: "real_teknisi",
-                    attributes: ["user_id", "user_nama"],
-                    ...(isAdmin || isManager
-                        ? {
-                              where: {
-                                  ...(isAdmin
-                                      ? { user_divisi: userDivisi }
-                                      : {}),
-                                  user_jabatan: {
-                                      [Op.in]: [
-                                          "user",
-                                          "teknisi",
-                                          "it_support",
-                                      ],
-                                  },
-                              },
-                          }
-                        : {}),
+                    attributes: [
+                        "user_id",
+                        "user_nama",
+                        "user_divisi",
+                        "user_jabatan",
+                    ],
+                },
+                {
+                    model: HasilChecklist,
+                    as: "plan_hasil_checklists",
+                    include: [
+                        {
+                            model: ChecklistTemplate,
+                            as: "hc_ct",
+                            attributes: [
+                                "ct_id",
+                                "ct_item",
+                                "ct_keterangan",
+                                "ct_urutan",
+                            ],
+                        },
+                    ],
                 },
             ],
             order,
@@ -234,13 +279,16 @@ const getOne = async (req, res, next) => {
                 v.inv_no,
                 v.inv_nama,
                 v.inv_pic,
+                inv.inv_serial_number AS inv_serial_number,
                 v.inv_kondisi_awal,
                 v.inv_pabrik_kode,
-                v.teknisi_nama,
-                v.teknisi_divisi,
+                COALESCE(v.teknisi_nama, u.user_nama) AS teknisi_nama,
+                COALESCE(v.teknisi_divisi, u.user_divisi) AS teknisi_divisi,
                 v.approver_nama
             FROM plan_realisasi r
             LEFT JOIN v_realisasi_detail v ON v.real_id = r.real_id
+            LEFT JOIN plan_inventaris inv ON inv.inv_id = r.real_inv_id
+            LEFT JOIN plan_user u ON u.user_id = r.real_teknisi_id
             WHERE r.real_id = :realId
             LIMIT 1
             `,
@@ -261,33 +309,6 @@ const getOne = async (req, res, next) => {
             normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
         if (selfOnlyScope) {
             if (Number(row.real_teknisi_id) !== Number(req.user.user_id)) {
-                return response.error(
-                    res,
-                    "Akses detail realisasi ditolak",
-                    403,
-                );
-            }
-        } else if (isAdmin || isManager) {
-            const teknisi = await User.findByPk(row.real_teknisi_id, {
-                attributes: ["user_id", "user_divisi", "user_jabatan"],
-            });
-            const teknisiDivisi = teknisi
-                ? normalizeDivisi(teknisi.user_divisi) || teknisi.user_divisi
-                : row.teknisi_divisi;
-            const teknisiJabatan = String(
-                teknisi?.user_jabatan || "",
-            ).toLowerCase();
-
-            const allowedRoles = ["user", "teknisi", "it_support"];
-            if (!allowedRoles.includes(teknisiJabatan)) {
-                return response.error(
-                    res,
-                    "Akses detail realisasi ditolak",
-                    403,
-                );
-            }
-
-            if (isAdmin && teknisiDivisi && teknisiDivisi !== userDivisi) {
                 return response.error(
                     res,
                     "Akses detail realisasi ditolak",
@@ -357,6 +378,7 @@ const getOne = async (req, res, next) => {
                 inv_no: row.inv_no,
                 inv_nama: row.inv_nama,
                 inv_pic: row.inv_pic,
+                inv_serial_number: row.inv_serial_number,
                 inv_kondisi_awal: row.inv_kondisi_awal,
                 inv_pabrik_kode: row.inv_pabrik_kode,
             },
@@ -497,7 +519,7 @@ const validateRealisasiEligibility = async (
                 const nextEligibleDate = addDays(lastDate, gapHari);
                 if (currentDate < nextEligibleDate) {
                     return {
-                        error: `Inventaris belum melewati gap realisasi ${gapHari} hari. Bisa direalisasikan lagi pada ${formatDateOnly(nextEligibleDate)}`,
+                        error: `Inventaris belum melewati gap realisasi ${gapHari} hari. Bisa direalisasikan lagi pada ${formatDateDisplay(nextEligibleDate)}`,
                         status: 400,
                     };
                 }
@@ -529,7 +551,7 @@ const validateRealisasiEligibility = async (
                 const nextEligibleDate = addDays(lastDate, jadwalGapHari);
                 if (currentDate < nextEligibleDate) {
                     return {
-                        error: `Jadwal ini memiliki gap realisasi ${jadwalGapHari} hari. Realisasi berikutnya dapat dilakukan pada ${formatDateOnly(nextEligibleDate)}`,
+                        error: `Jadwal ini memiliki gap realisasi ${jadwalGapHari} hari. Realisasi berikutnya dapat dilakukan pada ${formatDateDisplay(nextEligibleDate)}`,
                         status: 400,
                     };
                 }
@@ -900,9 +922,155 @@ const uploadFoto = async (req, res, next) => {
     }
 };
 
+const getKendala = async (req, res, next) => {
+    try {
+        const { divisi, bulan, tahun, tindak_lanjut } = req.query;
+        const where = {
+            real_kondisi_akhir: {
+                [Op.in]: ["Rusak", "Perlu Perhatian"],
+            },
+        };
+
+        const subqueryCondition = `EXISTS (
+            SELECT 1 FROM plan_realisasi r2
+            WHERE r2.real_inv_id = plan_realisasi.real_inv_id
+              AND r2.real_status = 'Selesai'
+              AND r2.real_kondisi_akhir = 'Baik'
+              AND (
+                r2.real_tgl > plan_realisasi.real_tgl
+                OR (r2.real_tgl = plan_realisasi.real_tgl AND r2.real_id > plan_realisasi.real_id)
+              )
+        )`;
+
+        if (tindak_lanjut === "1") {
+            where[Op.and] = [sequelize.literal(subqueryCondition)];
+        } else if (tindak_lanjut === "0") {
+            where[Op.and] = [sequelize.literal(`NOT (${subqueryCondition})`)];
+        }
+
+        if (bulan) where.real_bulan = bulan;
+        if (tahun) where.real_tahun = tahun;
+
+        const isAdmin = isAdminUser(req);
+        const isManager = isManagerUser(req);
+        const userDivisi =
+            normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
+
+        const includeJadwal = {
+            model: Jadwal,
+            as: "real_jadwal",
+            attributes: [
+                "jdw_id",
+                "jdw_judul",
+                "jdw_frekuensi",
+                "jdw_divisi",
+                "jdw_status",
+            ],
+        };
+
+        let targetDivisiKendala = null;
+        if (divisi && String(divisi).toLowerCase() !== "true" && String(divisi).toLowerCase() !== "false") {
+            targetDivisiKendala = divisi;
+        } else if (req.query.by_divisi) {
+            if (String(req.query.by_divisi).toLowerCase() === "true") {
+                targetDivisiKendala = userDivisi;
+            } else if (String(req.query.by_divisi).toLowerCase() !== "false") {
+                targetDivisiKendala = req.query.by_divisi;
+            }
+        } else if (!isAdmin && !isManager) {
+            targetDivisiKendala = userDivisi;
+        }
+
+        if (targetDivisiKendala) {
+            includeJadwal.where = { jdw_divisi: targetDivisiKendala };
+        }
+
+        const list = await Realisasi.findAll({
+            where,
+            include: [
+                includeJadwal,
+                {
+                    model: Inventaris,
+                    as: "real_inv",
+                    attributes: [
+                        "inv_id",
+                        "inv_no",
+                        "inv_nama",
+                        "inv_serial_number",
+                        "inv_pabrik_kode",
+                        "inv_pic",
+                    ],
+                },
+                {
+                    model: User,
+                    as: "real_teknisi",
+                    attributes: ["user_id", "user_nama", "user_divisi"],
+                },
+                {
+                    model: HasilChecklist,
+                    as: "plan_hasil_checklists",
+                    include: [
+                        {
+                            model: ChecklistTemplate,
+                            as: "hc_ct",
+                            attributes: [
+                                "ct_id",
+                                "ct_item",
+                                "ct_keterangan",
+                                "ct_urutan",
+                            ],
+                        },
+                    ],
+                },
+            ],
+            order: [
+                ["real_tgl", "DESC"],
+                ["real_id", "DESC"],
+            ],
+        });
+
+        const data = await Promise.all(
+            list.map(async (item) => {
+                const plainObj = serializeRealisasi(item);
+                const handled = await Realisasi.findOne({
+                    where: {
+                        real_inv_id: item.real_inv_id,
+                        real_status: "Selesai",
+                        real_kondisi_akhir: "Baik",
+                        [Op.or]: [
+                            { real_tgl: { [Op.gt]: item.real_tgl } },
+                            {
+                                [Op.and]: [
+                                    { real_tgl: item.real_tgl },
+                                    { real_id: { [Op.gt]: item.real_id } },
+                                ],
+                            },
+                        ],
+                    },
+                    attributes: ["real_id", "real_tgl", "real_kondisi_akhir"],
+                });
+                plainObj.is_tindak_lanjut = handled ? 1 : 0;
+                plainObj.tindak_lanjut_info = handled
+                    ? `Unit telah direalisasikan kembali dengan kondisi Baik pada ${handled.real_tgl}`
+                    : null;
+                return plainObj;
+            }),
+        );
+
+        return response.ok(
+            res,
+            data,
+            "Berhasil mengambil data kendala maintenance",
+        );
+    } catch (err) {
+        next(err);
+    }
+};
+
 module.exports = {
     getAll,
     getOne,
+    getKendala,
     checkEligibility,
     create,
     update,

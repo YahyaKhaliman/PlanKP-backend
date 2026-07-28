@@ -78,45 +78,83 @@ const resolveHariLiburDateColumn = async () => {
     return null;
 };
 
-const getHolidaysForMonth = async (year, month) => {
-    const dateColumn = await resolveHariLiburDateColumn();
-    if (!dateColumn) return new Set();
+const DIVISI_6_HARI = ["GA", "TEKNISI", "MAINTENANCE", "PRODUKSI", "WORKSHOP"];
 
-    const fullTableName = `${escapeIdentifier(HARI_LIBUR_SCHEMA)}.${escapeIdentifier(HARI_LIBUR_TABLE)}`;
-    const dateColumnName = escapeIdentifier(dateColumn);
+const is6DaysDivisi = (divisi) => {
+    if (!divisi) return false;
+    const norm = String(divisi).trim().toUpperCase();
+    return DIVISI_6_HARI.some((d) => d.toUpperCase() === norm);
+};
+
+const getHolidaysForMonth = async (year, month, divisi = null) => {
+    const dateColumn = await resolveHariLiburDateColumn();
 
     const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
     const monthEndDate = new Date(year, month, 0);
     const monthEnd = `${monthEndDate.getFullYear()}-${String(monthEndDate.getMonth() + 1).padStart(2, "0")}-${String(monthEndDate.getDate()).padStart(2, "0")}`;
 
-    const rows = await sequelize.query(
-        `
-        SELECT
-            DATE_FORMAT(DATE(${dateColumnName}), '%Y-%m-%d') AS tanggal
-        FROM ${fullTableName}
-        WHERE DATE(${dateColumnName}) BETWEEN :monthStart AND :monthEnd
-        ORDER BY DATE(${dateColumnName}) ASC
-        `,
-        {
-            replacements: { monthStart, monthEnd },
-            type: QueryTypes.SELECT,
-        },
-    );
-
     const holidays = new Set();
-    rows.forEach((row) => {
-        const dateStr = String(row.tanggal || "");
-        if (dateStr) {
-            const day = new Date(dateStr).getDate();
-            holidays.add(day);
+
+    if (dateColumn) {
+        const fullTableName = `${escapeIdentifier(HARI_LIBUR_SCHEMA)}.${escapeIdentifier(HARI_LIBUR_TABLE)}`;
+        const dateColumnName = escapeIdentifier(dateColumn);
+
+        const rows = await sequelize.query(
+            `
+            SELECT
+                DATE_FORMAT(DATE(${dateColumnName}), '%Y-%m-%d') AS tanggal
+            FROM ${fullTableName}
+            WHERE DATE(${dateColumnName}) BETWEEN :monthStart AND :monthEnd
+            ORDER BY DATE(${dateColumnName}) ASC
+            `,
+            {
+                replacements: { monthStart, monthEnd },
+                type: QueryTypes.SELECT,
+            },
+        );
+
+        rows.forEach((row) => {
+            const dateStr = String(row.tanggal || "");
+            if (dateStr) {
+                const day = new Date(dateStr).getDate();
+                holidays.add(day);
+            }
+        });
+    }
+
+    // Jika BUKAN divisi 6 hari kerja (misal 5 hari kerja atau default),
+    // tambahkan semua hari Sabtu di bulan tersebut sebagai hari libur
+    if (!is6DaysDivisi(divisi)) {
+        const totalDays = monthEndDate.getDate();
+        for (let d = 1; d <= totalDays; d++) {
+            const dt = new Date(year, month - 1, d);
+            if (dt.getDay() === 6) { // Sabtu
+                holidays.add(d);
+            }
         }
-    });
+    }
+
     return holidays;
 };
 
-const findNextWorkingDay = (date, limit, holidays) => {
+const isWorkingDay = (date, divisi, holidays) => {
+    const dayNum = date.getDate();
+    if (holidays && holidays.has(dayNum)) return false;
+
+    const dayOfWeek = date.getDay(); // 0: Minggu, 6: Sabtu
+    if (dayOfWeek === 0) return false; // Minggu selalu libur umum
+
+    if (dayOfWeek === 6) {
+        // Sabtu
+        return is6DaysDivisi(divisi);
+    }
+
+    return true;
+};
+
+const findNextWorkingDay = (date, limit, holidays, divisi) => {
     const d = new Date(date);
-    while (holidays.has(d.getDate())) {
+    while (!isWorkingDay(d, divisi, holidays)) {
         d.setDate(d.getDate() + 1);
         if (d > limit) return null;
     }
@@ -130,20 +168,19 @@ const getEffectiveScheduleDatesInMonth = (j, start, end, holidays) => {
 
     const rangeStart = jStart > start ? jStart : start;
     const jEndStr = j.jdw_tgl_selesai;
-    const jEnd = (!jEndStr || jEndStr === "")
-        ? end
-        : new Date(jEndStr);
+    const jEnd = !jEndStr || jEndStr === "" ? end : new Date(jEndStr);
     if (jEnd) jEnd.setHours(0, 0, 0, 0);
 
     const rangeEnd = jEnd < end ? jEnd : end;
     if (rangeEnd < rangeStart) return [];
 
     const dates = [];
+    const divisi = j.jdw_divisi || "";
 
     if (j.jdw_frekuensi === "Harian") {
         const curr = new Date(rangeStart);
         while (curr <= rangeEnd) {
-            if (!holidays.has(curr.getDate())) {
+            if (isWorkingDay(curr, divisi, holidays)) {
                 dates.push(new Date(curr));
             }
             curr.setDate(curr.getDate() + 1);
@@ -152,7 +189,12 @@ const getEffectiveScheduleDatesInMonth = (j, start, end, holidays) => {
         const curr = new Date(jStart);
         while (curr <= rangeEnd) {
             if (curr >= rangeStart) {
-                const nextWork = findNextWorkingDay(curr, rangeEnd, holidays);
+                const nextWork = findNextWorkingDay(
+                    curr,
+                    rangeEnd,
+                    holidays,
+                    divisi,
+                );
                 if (nextWork) {
                     dates.push(nextWork);
                 }
@@ -160,7 +202,12 @@ const getEffectiveScheduleDatesInMonth = (j, start, end, holidays) => {
             curr.setDate(curr.getDate() + 7);
         }
     } else if (j.jdw_frekuensi === "Bulanan") {
-        const nextWork = findNextWorkingDay(rangeStart, rangeEnd, holidays);
+        const nextWork = findNextWorkingDay(
+            rangeStart,
+            rangeEnd,
+            holidays,
+            divisi,
+        );
         if (nextWork) {
             dates.push(nextWork);
         }
@@ -433,18 +480,27 @@ const getDashboardSummary = async (req, res, next) => {
             });
 
             let diff = 0;
-            const startDate = plain.jdw_tgl_mulai ? new Date(plain.jdw_tgl_mulai) : null;
+            const startDate = plain.jdw_tgl_mulai
+                ? new Date(plain.jdw_tgl_mulai)
+                : null;
             if (startDate) startDate.setHours(0, 0, 0, 0);
 
             if (startDate && startDate > todayDate) {
                 diff = Math.floor((startDate - todayDate) / 86400000);
-            } else if (!countdown.periodFulfilled && (plain.jdw_frekuensi === 'Mingguan' || plain.jdw_frekuensi === 'Bulanan')) {
+            } else if (
+                !countdown.periodFulfilled &&
+                (plain.jdw_frekuensi === "Mingguan" ||
+                    plain.jdw_frekuensi === "Bulanan")
+            ) {
                 diff = 0;
             } else if (countdown.daysRemaining !== null) {
                 diff = countdown.daysRemaining;
             } else {
-                const fallbackDateStr = countdown.nextDueDate || plain.jdw_tgl_mulai;
-                const fallbackDate = fallbackDateStr ? new Date(fallbackDateStr) : null;
+                const fallbackDateStr =
+                    countdown.nextDueDate || plain.jdw_tgl_mulai;
+                const fallbackDate = fallbackDateStr
+                    ? new Date(fallbackDateStr)
+                    : null;
                 if (fallbackDate) {
                     fallbackDate.setHours(0, 0, 0, 0);
                     diff = Math.floor((fallbackDate - todayDate) / 86400000);
@@ -468,11 +524,55 @@ const getDashboardSummary = async (req, res, next) => {
         let totalTargetBulanIni = 0;
         for (const j of activeJadwalList) {
             const plain = j.get({ plain: true });
-            const dates = getEffectiveScheduleDatesInMonth(plain, startOfMonth, endOfMonth, holidays);
+            const dates = getEffectiveScheduleDatesInMonth(
+                plain,
+                startOfMonth,
+                endOfMonth,
+                holidays,
+            );
             const count = dates.length;
-            const perTarget = Number(plain.jdw_target || 0) > 0 ? Number(plain.jdw_target) : Number(plain.jdw_total_unit || 0);
+            const perTarget =
+                Number(plain.jdw_target || 0) > 0
+                    ? Number(plain.jdw_target)
+                    : Number(plain.jdw_total_unit || 0);
             totalTargetBulanIni += count * perTarget;
         }
+
+        // Hitung total kendala (Rusak / Perlu Perhatian) yang belum ditindaklanjuti (aktif)
+        const subqueryResolved = `EXISTS (
+            SELECT 1 FROM plan_realisasi r2
+            WHERE r2.real_inv_id = plan_realisasi.real_inv_id
+              AND r2.real_status = 'Selesai'
+              AND r2.real_kondisi_akhir = 'Baik'
+              AND (
+                r2.real_tgl > plan_realisasi.real_tgl
+                OR (r2.real_tgl = plan_realisasi.real_tgl AND r2.real_id > plan_realisasi.real_id)
+              )
+        )`;
+
+        const kendalaWhere = {
+            real_kondisi_akhir: {
+                [Op.in]: ["Rusak", "Perlu Perhatian"],
+            },
+            [Op.and]: [sequelize.literal(`NOT (${subqueryResolved})`)],
+        };
+
+        const includeJadwalForKendala = {
+            model: Jadwal,
+            as: "real_jadwal",
+            attributes: [],
+        };
+
+        if (isAdmin && userDivisi) {
+            includeJadwalForKendala.where = { jdw_divisi: userDivisi };
+        } else if (isSelfOnly) {
+            includeJadwalForKendala.where = { jdw_assigned_to: userId };
+        }
+
+        const totalKendala = await Realisasi.count({
+            where: kendalaWhere,
+            include: [includeJadwalForKendala],
+        });
 
         return response.ok(res, {
             summary_cards: {
@@ -484,6 +584,7 @@ const getDashboardSummary = async (req, res, next) => {
                 realisasi_bulan_ini: realisasiBulanIni,
                 total_target_bulan_ini: totalTargetBulanIni,
                 pending_tasks: pendingTasks,
+                total_kendala: totalKendala,
             },
             generated_at: new Date().toISOString(),
         });
@@ -497,4 +598,6 @@ module.exports = {
     getDashboardSummary,
     getHolidaysForMonth,
     getEffectiveScheduleDatesInMonth,
+    DIVISI_6_HARI,
+    is6DaysDivisi,
 };

@@ -8,7 +8,7 @@ const ALLOWED_JABATAN = ["admin", "user", "manager", "teknisi", "it_support"];
 // GET /users?jabatan=&divisi=&q=
 const getAll = async (req, res, next) => {
     try {
-        const { jabatan, divisi, q } = req.query;
+        const { jabatan, divisi, q, scope } = req.query;
         const where = { user_is_active: { [Op.or]: [1, 0] } };
         const isAdmin = req.user.user_jabatan === "admin";
 
@@ -33,8 +33,8 @@ const getAll = async (req, res, next) => {
 
         if (q) where.user_nama = { [Op.like]: `%${q}%` };
 
-        // admin hanya lihat user dalam scope divisinya
-        if (req.adminScope) {
+        // admin hanya lihat user dalam scope divisinya (kecuali scope === "all" untuk penugasan jadwal)
+        if (req.adminScope && scope !== "all") {
             where.user_divisi = req.adminScope;
         }
 

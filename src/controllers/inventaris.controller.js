@@ -143,7 +143,7 @@ const create = async (req, res, next) => {
             inv_no,
             inv_nama,
             inv_jenis_id,
-            inv_pabrik_kode: inv_pabrik_kode || null,
+            inv_pabrik_kode: inv_pabrik_kode ? String(inv_pabrik_kode).trim().toUpperCase() : null,
             inv_merk,
             inv_serial_number,
             inv_pic,
@@ -179,7 +179,13 @@ const update = async (req, res, next) => {
             "inv_is_active",
         ];
         fields.forEach((f) => {
-            if (req.body[f] !== undefined) data[f] = req.body[f];
+            if (req.body[f] !== undefined) {
+                if (f === "inv_pabrik_kode") {
+                    data[f] = req.body[f] ? String(req.body[f]).trim().toUpperCase() : null;
+                } else {
+                    data[f] = req.body[f];
+                }
+            }
         });
 
         const effectiveJenisId =

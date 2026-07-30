@@ -43,7 +43,7 @@ const splitPabrikCodes = (value) => {
     const raw = Array.isArray(value) ? value : String(value).split(",");
     const unique = new Set();
     raw.forEach((code) => {
-        const cleaned = String(code).trim();
+        const cleaned = String(code).trim().toUpperCase();
         if (cleaned) unique.add(cleaned);
     });
     return Array.from(unique);
@@ -797,7 +797,17 @@ const getByDivisi = async (req, res, next) => {
         const order = resolveJadwalSort(req.query.sort, req.query.order);
         const isAdmin = req.user.user_jabatan === "admin";
         const userDivisi = getUserDivisiScope(req);
-        const where = { jdw_divisi: userDivisi };
+        const userId = req.user.user_id;
+
+        const where = {};
+        if (isAdmin) {
+            where[Op.or] = [
+                { jdw_divisi: userDivisi },
+                { jdw_assigned_to: userId },
+            ];
+        } else {
+            where.jdw_divisi = userDivisi;
+        }
         if (status) {
             where.jdw_status = status;
         } else {
@@ -830,17 +840,13 @@ const getByDivisi = async (req, res, next) => {
                         "user_jabatan",
                         "user_divisi",
                     ],
-                    ...(isAdmin
-                        ? {
-                              where: buildAdminAssignedUserScope(req),
-                              required: true,
-                          }
-                        : {}),
+                    required: false,
                 },
                 {
                     model: User,
                     as: "jdw_dibuat_oleh_plan_user",
                     attributes: ["user_id", "user_nama"],
+                    required: false,
                 },
             ],
             order,

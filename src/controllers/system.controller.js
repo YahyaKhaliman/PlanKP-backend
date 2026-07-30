@@ -128,7 +128,8 @@ const getHolidaysForMonth = async (year, month, divisi = null) => {
         const totalDays = monthEndDate.getDate();
         for (let d = 1; d <= totalDays; d++) {
             const dt = new Date(year, month - 1, d);
-            if (dt.getDay() === 6) { // Sabtu
+            if (dt.getDay() === 6) {
+                // Sabtu
                 holidays.add(d);
             }
         }
@@ -302,7 +303,7 @@ const getDashboardSummary = async (req, res, next) => {
     try {
         const userRole = String(req.user.user_jabatan || "").toLowerCase();
         const isManager = userRole === "manager";
-        const isAdmin = userRole === "admin";
+        const isAdmin = userRole === "admin" || isManager;
         const isSelfOnly = ["user", "teknisi", "it_support"].includes(userRole);
 
         const userId = req.user.user_id;

@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const ExcelJS = require("exceljs");
 const {
     plan_realisasi: Realisasi,
     plan_hasil_checklist: HasilChecklist,
@@ -35,7 +36,7 @@ const splitPabrikCodes = (value) => {
     if (!value) return [];
     const raw = Array.isArray(value) ? value : String(value).split(",");
     return raw
-        .map((code) => String(code).trim())
+        .map((code) => String(code).trim().toUpperCase())
         .filter((code) => code.length > 0);
 };
 
@@ -162,7 +163,7 @@ const getAll = async (req, res, next) => {
             } else if (String(by_divisi).toLowerCase() !== "false") {
                 targetDivisi = by_divisi;
             }
-        } else if (!isAdmin && !isManager) {
+        } else if (!isManager) {
             targetDivisi = userDivisi;
         }
 
@@ -1067,6 +1068,326 @@ const getKendala = async (req, res, next) => {
     }
 };
 
+const exportExcel = async (req, res, next) => {
+    try {
+        const {
+            jadwal_id,
+            status,
+            bulan,
+            tahun,
+            teknisi_id,
+            by_divisi,
+            divisi,
+        } = req.query;
+
+        const where = {};
+        const includeJadwal = {
+            model: Jadwal,
+            as: "real_jadwal",
+            attributes: [
+                "jdw_id",
+                "jdw_judul",
+                "jdw_frekuensi",
+                "jdw_divisi",
+                "jdw_status",
+            ],
+        };
+
+        if (jadwal_id) where.real_jadwal_id = jadwal_id;
+        if (status) where.real_status = status;
+        if (bulan) where.real_bulan = bulan;
+        if (tahun) where.real_tahun = tahun;
+        if (teknisi_id) where.real_teknisi_id = teknisi_id;
+
+        const isAdmin = isAdminUser(req);
+        const isManager = isManagerUser(req);
+        const isSelfOnly = isSelfOnlyRealisasiRole(req);
+        const userDivisi =
+            normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
+
+        if (isSelfOnly && !jadwal_id) {
+            where.real_teknisi_id = req.user.user_id;
+        }
+
+        let targetDivisi = null;
+        if (divisi && String(divisi).toLowerCase() !== "true" && String(divisi).toLowerCase() !== "false") {
+            targetDivisi = divisi;
+        } else if (by_divisi) {
+            if (String(by_divisi).toLowerCase() === "true") {
+                targetDivisi = userDivisi;
+            } else if (String(by_divisi).toLowerCase() !== "false") {
+                targetDivisi = by_divisi;
+            }
+        } else if (!isManager) {
+            targetDivisi = userDivisi;
+        }
+
+        if (targetDivisi) {
+            includeJadwal.where = { jdw_divisi: targetDivisi };
+        }
+
+        const data = await Realisasi.findAll({
+            where,
+            include: [
+                includeJadwal,
+                {
+                    model: Inventaris,
+                    as: "real_inv",
+                    attributes: [
+                        "inv_id",
+                        "inv_no",
+                        "inv_nama",
+                        "inv_serial_number",
+                        "inv_pabrik_kode",
+                        "inv_pic",
+                    ],
+                    include: [
+                        {
+                            model: Jenis,
+                            as: "inv_jenis",
+                            attributes: ["jenis_nama"],
+                        },
+                    ],
+                },
+                {
+                    model: User,
+                    as: "real_teknisi",
+                    attributes: [
+                        "user_id",
+                        "user_nama",
+                        "user_divisi",
+                        "user_jabatan",
+                    ],
+                },
+            ],
+            order: [["real_tgl", "DESC"], ["real_id", "DESC"]],
+        });
+
+        // Filter teknisi nama jika teknisi_id dipasang
+        let filterTeknisiNama = "Semua Pelaksana";
+        if (teknisi_id) {
+            const teknisiUser = await User.findByPk(teknisi_id, {
+                attributes: ["user_nama"],
+            });
+            if (teknisiUser) filterTeknisiNama = teknisiUser.user_nama;
+        }
+
+        // Build Excel Workbook
+        const workbook = new ExcelJS.Workbook();
+        workbook.creator = "PlanKP System";
+        workbook.created = new Date();
+
+        const sheet = workbook.addWorksheet("Laporan Realisasi", {
+            pageSetup: { paperSize: 9, orientation: "landscape" },
+        });
+
+        // Title Block
+        const titleRow = sheet.addRow(["LAPORAN REALISASI MAINTENANCE - PLAN KP"]);
+        titleRow.font = { name: "Calibri", size: 16, bold: true, color: { argb: "1E293B" } };
+        sheet.mergeCells("A1:N1");
+
+        const months = [
+            "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+            "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+        ];
+        const monthLabel = bulan ? months[Number(bulan) - 1] || bulan : "Semua Bulan";
+        const yearLabel = tahun || "Semua Tahun";
+        const divisiLabel = targetDivisi || "Semua Divisi";
+
+        const infoRow = sheet.addRow([
+            `Periode: ${monthLabel} ${yearLabel} | Divisi: ${divisiLabel} | Pelaksana: ${filterTeknisiNama}`
+        ]);
+        infoRow.font = { name: "Calibri", size: 11, italic: true, color: { argb: "475569" } };
+        sheet.mergeCells("A2:N2");
+
+        const nowStr = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
+        const printRow = sheet.addRow([`Tanggal Cetak: ${nowStr}`]);
+        printRow.font = { name: "Calibri", size: 9, italic: true, color: { argb: "64748B" } };
+        sheet.mergeCells("A3:N3");
+
+        sheet.addRow([]); // Blank row 4
+
+        // KPI Summary Block on Rows 5-6 with Excel Formulas
+        const kpiHeaderRow = sheet.addRow([
+            "TOTAL REALISASI", "", "KONDISI BAIK", "", "PERLU PERHATIAN", "", "KONDISI RUSAK", ""
+        ]);
+        kpiHeaderRow.font = { name: "Calibri", size: 9, bold: true, color: { argb: "475569" } };
+        sheet.mergeCells("A5:B5");
+        sheet.mergeCells("C5:D5");
+        sheet.mergeCells("E5:F5");
+        sheet.mergeCells("G5:H5");
+
+        const totalRowsCount = data.length;
+        const lastRowIndex = 9 + (totalRowsCount > 0 ? totalRowsCount : 1);
+
+        const kpiValueRow = sheet.addRow([]);
+        kpiValueRow.font = { name: "Calibri", size: 14, bold: true };
+
+        // Total formula: COUNTA on column A (from A10 to last row)
+        sheet.getCell("A6").value = { formula: `COUNTA(A10:A${lastRowIndex})` };
+        sheet.getCell("A6").font = { name: "Calibri", size: 14, bold: true, color: { argb: "0F172A" } };
+        sheet.mergeCells("A6:B6");
+
+        // Baik formula: COUNTIF on Column K ("Baik")
+        sheet.getCell("C6").value = { formula: `COUNTIF(K10:K${lastRowIndex}, "Baik")` };
+        sheet.getCell("C6").font = { name: "Calibri", size: 14, bold: true, color: { argb: "16A34A" } };
+        sheet.mergeCells("C6:D6");
+
+        // Perlu Perhatian formula: COUNTIF on Column K ("Perlu Perhatian")
+        sheet.getCell("E6").value = { formula: `COUNTIF(K10:K${lastRowIndex}, "Perlu Perhatian")` };
+        sheet.getCell("E6").font = { name: "Calibri", size: 14, bold: true, color: { argb: "D97706" } };
+        sheet.mergeCells("E6:F6");
+
+        // Rusak formula: COUNTIF on Column K ("Rusak")
+        sheet.getCell("G6").value = { formula: `COUNTIF(K10:K${lastRowIndex}, "Rusak")` };
+        sheet.getCell("G6").font = { name: "Calibri", size: 14, bold: true, color: { argb: "DC2626" } };
+        sheet.mergeCells("G6:H6");
+
+        sheet.addRow([]); // Blank row 7
+        sheet.addRow([]); // Blank row 8
+
+        // Table Header Row at Row 9
+        const headers = [
+            "No",
+            "Tanggal",
+            "Jam Selesai",
+            "Divisi",
+            "Teknisi / Pelaksana",
+            "No. Inventaris",
+            "Nama Inventaris",
+            "Jenis Inventaris",
+            "Pabrik / Lokasi",
+            "Frekuensi Jadwal",
+            "Kondisi Akhir",
+            "Temuan / Catatan Kendala",
+            "Nama PIC (TTD)",
+            "Status Realisasi"
+        ];
+        const headerRow = sheet.addRow(headers);
+        headerRow.font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFFFF" } };
+        headerRow.height = 24;
+
+        headerRow.eachCell((cell) => {
+            cell.fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: "1E293B" } // Dark Slate
+            };
+            cell.alignment = { vertical: "middle", horizontal: "center" };
+            cell.border = {
+                top: { style: "thin", color: { argb: "94A3B8" } },
+                bottom: { style: "medium", color: { argb: "0F172A" } },
+                left: { style: "thin", color: { argb: "334155" } },
+                right: { style: "thin", color: { argb: "334155" } },
+            };
+        });
+
+        // Data Rows starting Row 10
+        data.forEach((item, index) => {
+            const r = item.get({ plain: true });
+            const inv = r.real_inv || {};
+            const jenis = inv.inv_jenis || {};
+            const teknisi = r.real_teknisi || {};
+            const jadwal = r.real_jadwal || {};
+
+            const tglStr = formatDateDisplay(r.real_tgl ? new Date(r.real_tgl) : null);
+            const jamStr = r.real_jam_selesai || r.real_jam_mulai || "-";
+            const divisiStr = r.real_divisi || jadwal.jdw_divisi || teknisi.user_divisi || "-";
+            const teknisiNama = teknisi.user_nama || r.real_ttd_pic_nama || "-";
+            const noInv = inv.inv_no || "-";
+            const namaInv = inv.inv_nama || "-";
+            const jenisNama = jenis.jenis_nama || "-";
+            const pabrikKode = inv.inv_pabrik_kode || "-";
+            const frekuensi = jadwal.jdw_frekuensi || "-";
+            const kondisi = r.real_kondisi_akhir || "Baik";
+            const catatan = r.real_keterangan || "-";
+            const picNama = r.real_ttd_pic_nama || "-";
+            const statusStr = r.real_status || "Selesai";
+
+            const row = sheet.addRow([
+                index + 1,
+                tglStr,
+                jamStr,
+                divisiStr,
+                teknisiNama,
+                noInv,
+                namaInv,
+                jenisNama,
+                pabrikKode,
+                frekuensi,
+                kondisi,
+                catatan,
+                picNama,
+                statusStr
+            ]);
+
+            const isEven = index % 2 === 0;
+            const bgHex = isEven ? "FFFFFF" : "F8FAFC";
+
+            row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                cell.fill = {
+                    type: "pattern",
+                    pattern: "solid",
+                    fgColor: { argb: bgHex }
+                };
+                cell.border = {
+                    top: { style: "thin", color: { argb: "E2E8F0" } },
+                    bottom: { style: "thin", color: { argb: "E2E8F0" } },
+                    left: { style: "thin", color: { argb: "E2E8F0" } },
+                    right: { style: "thin", color: { argb: "E2E8F0" } },
+                };
+                cell.alignment = { vertical: "middle", horizontal: "left" };
+
+                // Center align columns 1, 2, 3, 9, 10, 14
+                if ([1, 2, 3, 9, 10, 14].includes(colNumber)) {
+                    cell.alignment = { vertical: "middle", horizontal: "center" };
+                }
+
+                // Kondisi Akhir Styling
+                if (colNumber === 11) {
+                    cell.alignment = { vertical: "middle", horizontal: "center" };
+                    cell.font = { bold: true };
+                    if (kondisi === "Baik") {
+                        cell.font = { bold: true, color: { argb: "16A34A" } };
+                    } else if (kondisi === "Perlu Perhatian") {
+                        cell.font = { bold: true, color: { argb: "D97706" } };
+                    } else if (kondisi === "Rusak") {
+                        cell.font = { bold: true, color: { argb: "DC2626" } };
+                    }
+                }
+            });
+        });
+
+        // Auto-fit column widths
+        sheet.columns.forEach((column) => {
+            let maxLength = 0;
+            column.eachCell({ includeEmpty: true }, (cell) => {
+                const valStr = cell.value ? String(cell.value) : "";
+                if (valStr.length > maxLength) {
+                    maxLength = valStr.length;
+                }
+            });
+            column.width = Math.max(maxLength + 4, 12);
+        });
+
+        const filename = `Laporan_Realisasi_${tahun || "Semua"}_${bulan || "Semua"}.xlsx`;
+
+        res.setHeader(
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+        res.setHeader(
+            "Content-Disposition",
+            `attachment; filename="${filename}"`
+        );
+
+        await workbook.xlsx.write(res);
+        res.end();
+    } catch (err) {
+        next(err);
+    }
+};
+
 module.exports = {
     getAll,
     getOne,
@@ -1078,4 +1399,5 @@ module.exports = {
     saveTtd,
     getTemplate,
     uploadFoto,
+    exportExcel,
 };

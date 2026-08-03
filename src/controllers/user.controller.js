@@ -10,9 +10,14 @@ const getAll = async (req, res, next) => {
     try {
         const { jabatan, divisi, q, scope } = req.query;
         const where = { user_is_active: { [Op.or]: [1, 0] } };
-        const isAdmin = req.user.user_jabatan === "admin";
+        const userRole = String(req.user?.user_jabatan || "").toLowerCase();
+        const isAdmin = userRole === "admin";
+        const isManager = userRole === "manager";
+        const isSelfOnly = ["user", "teknisi", "it_support"].includes(userRole);
 
-        if (isAdmin) {
+        if (isSelfOnly && scope !== "all") {
+            where.user_id = req.user.user_id;
+        } else if (isAdmin || isManager) {
             if (jabatan) {
                 if (!ALLOWED_JABATAN.includes(jabatan)) {
                     return response.error(res, "Jabatan tidak valid", 400);
@@ -123,6 +128,24 @@ const update = async (req, res, next) => {
         )
             return response.error(res, "Jabatan tidak valid", 400);
 
+        const reqUserRole = String(req.user?.user_jabatan || "").toLowerCase();
+        if (user_jabatan !== undefined && user_jabatan !== data.user_jabatan) {
+            if (["user", "teknisi", "it_support"].includes(reqUserRole)) {
+                return response.error(
+                    res,
+                    "Anda tidak memiliki akses untuk mengubah jabatan",
+                    403,
+                );
+            }
+            if (reqUserRole === "admin" && user_jabatan === "manager") {
+                return response.error(
+                    res,
+                    "Admin tidak dapat mengubah atau memberikan jabatan manager",
+                    403,
+                );
+            }
+        }
+
         if (user_nama) data.user_nama = user_nama;
         if (user_jabatan) data.user_jabatan = user_jabatan;
         if (user_divisi !== undefined) data.user_divisi = normalizedDivisi;
@@ -134,7 +157,8 @@ const update = async (req, res, next) => {
             data.user_nik = user_nik;
         }
         if (user_password) {
-            const isEditingSelf = Number(req.user.user_id) === Number(data.user_id);
+            const isEditingSelf =
+                Number(req.user.user_id) === Number(data.user_id);
             if (isEditingSelf) {
                 if (!user_password_lama) {
                     return response.error(

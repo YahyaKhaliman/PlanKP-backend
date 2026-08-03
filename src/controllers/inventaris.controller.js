@@ -20,10 +20,16 @@ const findActiveJenis = async (jenisId, adminScope) => {
 // GET /inventaris
 const getAll = async (req, res, next) => {
     try {
-        const { jenis, q, aktif } = req.query;
+        const { jenis, q, aktif, pabrik } = req.query;
         const where = {};
         if (jenis) where.inv_jenis_id = jenis;
         if (aktif !== undefined) where.inv_is_active = aktif === "true" ? 1 : 0;
+        if (pabrik) {
+            const pabrikList = pabrik.split(",").map((p) => p.trim()).filter(Boolean);
+            if (pabrikList.length > 0) {
+                where.inv_pabrik_kode = { [Op.in]: pabrikList };
+            }
+        }
 
         const include = [
             {
@@ -39,6 +45,7 @@ const getAll = async (req, res, next) => {
                 { inv_nama: { [Op.like]: `%${q}%` } },
                 { inv_no: { [Op.like]: `%${q}%` } },
                 { inv_merk: { [Op.like]: `%${q}%` } },
+                { inv_pic: { [Op.like]: `%${q}%` } },
                 { "$jenis.jenis_nama$": { [Op.like]: `%${q}%` } },
             ];
         }

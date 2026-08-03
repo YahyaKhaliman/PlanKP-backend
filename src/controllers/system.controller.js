@@ -162,10 +162,33 @@ const findNextWorkingDay = (date, limit, holidays, divisi) => {
     return d;
 };
 
-const getEffectiveScheduleDatesInMonth = (j, start, end, holidays) => {
+const getEffectiveScheduleDatesInMonth = (j, start, end, holidays, customLastRealisasiDate = null) => {
     const jStart = j.jdw_tgl_mulai ? new Date(j.jdw_tgl_mulai) : null;
     if (!jStart) return [];
     jStart.setHours(0, 0, 0, 0);
+
+    const gapHari = Number(j.jdw_gap_hari || j.jdw_jeda_hari || 0);
+    if (gapHari > 0) {
+        if (j.jdw_frekuensi === "Bulanan") {
+            const intervalMonths = Math.max(1, Math.round(gapHari / 30));
+            const startMonthDate = new Date(start);
+            const diffMonths =
+                (startMonthDate.getFullYear() - jStart.getFullYear()) * 12 +
+                (startMonthDate.getMonth() - jStart.getMonth());
+
+            if (diffMonths > 0 && diffMonths % intervalMonths !== 0) {
+                // Bulan ini adalah bulan jeda dalam kalender tetap (Model B Anchor) -> target = 0
+                return [];
+            }
+        } else if (j.jdw_frekuensi === "Mingguan") {
+            const intervalWeeks = Math.max(1, Math.round(gapHari / 7));
+            const startWeekDate = new Date(start);
+            const diffWeeks = Math.floor((startWeekDate - jStart) / (7 * 86400000));
+            if (diffWeeks > 0 && diffWeeks % intervalWeeks !== 0) {
+                return [];
+            }
+        }
+    }
 
     const rangeStart = jStart > start ? jStart : start;
     const jEndStr = j.jdw_tgl_selesai;
@@ -303,7 +326,7 @@ const getDashboardSummary = async (req, res, next) => {
     try {
         const userRole = String(req.user.user_jabatan || "").toLowerCase();
         const isManager = userRole === "manager";
-        const isAdmin = userRole === "admin" || isManager;
+        const isAdmin = userRole === "admin";
         const isSelfOnly = ["user", "teknisi", "it_support"].includes(userRole);
 
         const userId = req.user.user_id;
@@ -314,7 +337,7 @@ const getDashboardSummary = async (req, res, next) => {
         const jadwalWhere = { jdw_status: "Selesai" };
         if (isSelfOnly) {
             jadwalWhere.jdw_assigned_to = userId;
-        } else if (isAdmin) {
+        } else if (isAdmin && userDivisi) {
             jadwalWhere[Op.or] = [
                 { jdw_divisi: userDivisi },
                 { jdw_assigned_to: userId },
@@ -329,7 +352,7 @@ const getDashboardSummary = async (req, res, next) => {
         }
 
         const realisasiTodayInclude = [];
-        if (isAdmin && !realisasiTodayWhere.real_teknisi_id) {
+        if (isAdmin && userDivisi && !realisasiTodayWhere.real_teknisi_id) {
             realisasiTodayInclude.push({
                 model: Jadwal,
                 as: "real_jadwal",
@@ -358,7 +381,7 @@ const getDashboardSummary = async (req, res, next) => {
         }
 
         const realisasiBulanIniInclude = [];
-        if (isAdmin && !realisasiBulanIniWhere.real_teknisi_id) {
+        if (isAdmin && userDivisi && !realisasiBulanIniWhere.real_teknisi_id) {
             realisasiBulanIniInclude.push({
                 model: Jadwal,
                 as: "real_jadwal",
@@ -378,7 +401,7 @@ const getDashboardSummary = async (req, res, next) => {
         }
 
         const realisasiDraftInclude = [];
-        if (isAdmin && !realisasiDraftWhere.real_teknisi_id) {
+        if (isAdmin && userDivisi && !realisasiDraftWhere.real_teknisi_id) {
             realisasiDraftInclude.push({
                 model: Jadwal,
                 as: "real_jadwal",
@@ -397,7 +420,7 @@ const getDashboardSummary = async (req, res, next) => {
         if (isSelfOnly) {
             unitWhereSql = " AND j.jdw_assigned_to = :userId";
             unitReplacements.userId = userId;
-        } else if (isAdmin) {
+        } else if (isAdmin && userDivisi) {
             unitWhereSql =
                 " AND (j.jdw_divisi = :userDivisi OR j.jdw_assigned_to = :userId)";
             unitReplacements.userDivisi = userDivisi;
@@ -434,7 +457,7 @@ const getDashboardSummary = async (req, res, next) => {
         const activeJadwalWhere = { jdw_status: "Draft" };
         if (isSelfOnly) {
             activeJadwalWhere.jdw_assigned_to = userId;
-        } else if (isAdmin) {
+        } else if (isAdmin && userDivisi) {
             activeJadwalWhere[Op.or] = [
                 { jdw_divisi: userDivisi },
                 { jdw_assigned_to: userId },
@@ -450,6 +473,7 @@ const getDashboardSummary = async (req, res, next) => {
                 "jdw_frekuensi",
                 "jdw_divisi",
                 "jdw_target",
+                "jdw_gap_hari",
                 "jdw_tgl_mulai",
                 "jdw_tgl_selesai",
                 [
@@ -467,6 +491,15 @@ const getDashboardSummary = async (req, res, next) => {
                     "jdw_total_unit",
                 ],
                 [sequelize.literal(currentPeriodDoneCount), "jdw_selesai_unit"],
+                [
+                    sequelize.literal(`(
+                        SELECT MAX(r.real_tgl)
+                        FROM plan_realisasi r
+                        WHERE r.real_jadwal_id = plan_jadwal.jdw_id
+                          AND r.real_status = 'Selesai'
+                    )`),
+                    "last_realisasi_tgl",
+                ],
             ],
         });
 
@@ -532,10 +565,9 @@ const getDashboardSummary = async (req, res, next) => {
                 holidays,
             );
             const count = dates.length;
-            const perTarget =
-                Number(plain.jdw_target || 0) > 0
-                    ? Number(plain.jdw_target)
-                    : Number(plain.jdw_total_unit || 0);
+            const targetVal = Number(plain.jdw_target || 0);
+            const liveTotalUnit = Number(plain.jdw_total_unit || 0);
+            const perTarget = Math.max(targetVal, liveTotalUnit);
             totalTargetBulanIni += count * perTarget;
         }
 
@@ -575,6 +607,75 @@ const getDashboardSummary = async (req, res, next) => {
             include: [includeJadwalForKendala],
         });
 
+        // Hitung perbandingan target vs realisasi 5 bulan terakhir
+        const monthNamesAbbr = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+        const monthlyComparison = [];
+
+        for (let i = 4; i >= 0; i--) {
+            const d = new Date(currentYear, currentMonth - 1 - i, 1);
+            const mMonth = d.getMonth() + 1;
+            const mYear = d.getFullYear();
+            const mName = monthNamesAbbr[d.getMonth()];
+
+            const mRealWhere = {
+                real_status: "Selesai",
+                real_bulan: mMonth,
+                real_tahun: mYear,
+            };
+            if (isSelfOnly) {
+                mRealWhere.real_teknisi_id = userId;
+            }
+            const mRealInclude = [];
+            if (isAdmin && userDivisi && !mRealWhere.real_teknisi_id) {
+                mRealInclude.push({
+                    model: Jadwal,
+                    as: "real_jadwal",
+                    attributes: [],
+                    where: { jdw_divisi: userDivisi },
+                });
+            }
+
+            const mRealCount = await Realisasi.count({
+                where: mRealWhere,
+                include: mRealInclude,
+            });
+
+            let mTargetCount = 0;
+            if (i === 0) {
+                mTargetCount = totalTargetBulanIni;
+            } else {
+                const mHolidays = await getHolidaysForMonth(mYear, mMonth);
+                const mStart = new Date(mYear, mMonth - 1, 1);
+                mStart.setHours(0, 0, 0, 0);
+                const mEnd = new Date(mYear, mMonth, 0);
+                mEnd.setHours(23, 59, 59, 999);
+
+                for (const j of activeJadwalList) {
+                    const plain = j.get({ plain: true });
+                    const dates = getEffectiveScheduleDatesInMonth(
+                        plain,
+                        mStart,
+                        mEnd,
+                        mHolidays,
+                    );
+                    const count = dates.length;
+                    const perTarget =
+                        Number(plain.jdw_target || 0) > 0
+                            ? Number(plain.jdw_target)
+                            : Number(plain.jdw_total_unit || 0);
+                    mTargetCount += count * perTarget;
+                }
+            }
+
+            monthlyComparison.push({
+                month: mName,
+                bulan: mMonth,
+                tahun: mYear,
+                target: mTargetCount,
+                realisasi: mRealCount,
+            });
+        }
+
         return response.ok(res, {
             summary_cards: {
                 jadwal_selesai: jadwalSelesai,
@@ -587,6 +688,7 @@ const getDashboardSummary = async (req, res, next) => {
                 pending_tasks: pendingTasks,
                 total_kendala: totalKendala,
             },
+            monthly_comparison: monthlyComparison,
             generated_at: new Date().toISOString(),
         });
     } catch (err) {

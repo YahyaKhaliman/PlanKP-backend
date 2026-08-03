@@ -171,49 +171,59 @@ const getAll = async (req, res, next) => {
             includeJadwal.where = { jdw_divisi: targetDivisi };
         }
 
+        const excludeAttrs = String(req.query.include_ttd).toLowerCase() === "true"
+            ? []
+            : ["real_ttd_data"];
+
+        const includes = [
+            includeJadwal,
+            {
+                model: Inventaris,
+                as: "real_inv",
+                attributes: [
+                    "inv_id",
+                    "inv_no",
+                    "inv_nama",
+                    "inv_serial_number",
+                    "inv_pabrik_kode",
+                    "inv_pic",
+                ],
+            },
+            {
+                model: User,
+                as: "real_teknisi",
+                attributes: [
+                    "user_id",
+                    "user_nama",
+                    "user_divisi",
+                    "user_jabatan",
+                ],
+            },
+        ];
+
+        if (String(req.query.include_checklist).toLowerCase() === "true") {
+            includes.push({
+                model: HasilChecklist,
+                as: "plan_hasil_checklists",
+                include: [
+                    {
+                        model: ChecklistTemplate,
+                        as: "hc_ct",
+                        attributes: [
+                            "ct_id",
+                            "ct_item",
+                            "ct_keterangan",
+                            "ct_urutan",
+                        ],
+                    },
+                ],
+            });
+        }
+
         const queryOptions = {
             where,
-            include: [
-                includeJadwal,
-                {
-                    model: Inventaris,
-                    as: "real_inv",
-                    attributes: [
-                        "inv_id",
-                        "inv_no",
-                        "inv_nama",
-                        "inv_serial_number",
-                        "inv_pabrik_kode",
-                        "inv_pic",
-                    ],
-                },
-                {
-                    model: User,
-                    as: "real_teknisi",
-                    attributes: [
-                        "user_id",
-                        "user_nama",
-                        "user_divisi",
-                        "user_jabatan",
-                    ],
-                },
-                {
-                    model: HasilChecklist,
-                    as: "plan_hasil_checklists",
-                    include: [
-                        {
-                            model: ChecklistTemplate,
-                            as: "hc_ct",
-                            attributes: [
-                                "ct_id",
-                                "ct_item",
-                                "ct_keterangan",
-                                "ct_urutan",
-                            ],
-                        },
-                    ],
-                },
-            ],
+            attributes: { exclude: excludeAttrs },
+            include: includes,
             order,
         };
 
@@ -536,25 +546,36 @@ const validateRealisasiEligibility = async (
         ["Mingguan", "Bulanan"].includes(jadwal.jdw_frekuensi) &&
         jadwalGapHari > 0
     ) {
-        const lastSelesaiJadwal = await Realisasi.findOne({
+        const targetCount = Number(jadwal.jdw_target || 0);
+        const totalSelesaiJadwal = await Realisasi.count({
             where: {
                 real_jadwal_id,
                 real_status: "Selesai",
             },
-            attributes: ["real_tgl"],
-            order: [["real_tgl", "DESC"]],
         });
+        const isCycleCompleted = targetCount > 0 ? totalSelesaiJadwal >= targetCount : true;
 
-        if (lastSelesaiJadwal?.real_tgl) {
-            const lastDate = normalizeDateOnly(lastSelesaiJadwal.real_tgl);
-            const currentDate = normalizeDateOnly(real_tgl);
-            if (lastDate && currentDate) {
-                const nextEligibleDate = addDays(lastDate, jadwalGapHari);
-                if (currentDate < nextEligibleDate) {
-                    return {
-                        error: `Jadwal ini memiliki gap realisasi ${jadwalGapHari} hari. Realisasi berikutnya dapat dilakukan pada ${formatDateDisplay(nextEligibleDate)}`,
-                        status: 400,
-                    };
+        if (isCycleCompleted) {
+            const lastSelesaiJadwal = await Realisasi.findOne({
+                where: {
+                    real_jadwal_id,
+                    real_status: "Selesai",
+                },
+                attributes: ["real_tgl"],
+                order: [["real_tgl", "DESC"]],
+            });
+
+            if (lastSelesaiJadwal?.real_tgl) {
+                const lastDate = normalizeDateOnly(lastSelesaiJadwal.real_tgl);
+                const currentDate = normalizeDateOnly(real_tgl);
+                if (lastDate && currentDate) {
+                    const nextEligibleDate = addDays(lastDate, jadwalGapHari);
+                    if (currentDate < nextEligibleDate) {
+                        return {
+                            error: `Jadwal ini memiliki gap realisasi ${jadwalGapHari} hari. Realisasi berikutnya dapat dilakukan pada ${formatDateDisplay(nextEligibleDate)}`,
+                            status: 400,
+                        };
+                    }
                 }
             }
         }
@@ -986,8 +1007,27 @@ const getKendala = async (req, res, next) => {
             includeJadwal.where = { jdw_divisi: targetDivisiKendala };
         }
 
+        const subqueryTgl = `(
+            SELECT r2.real_tgl FROM plan_realisasi r2
+            WHERE r2.real_inv_id = plan_realisasi.real_inv_id
+              AND r2.real_status = 'Selesai'
+              AND r2.real_kondisi_akhir = 'Baik'
+              AND (
+                r2.real_tgl > plan_realisasi.real_tgl
+                OR (r2.real_tgl = plan_realisasi.real_tgl AND r2.real_id > plan_realisasi.real_id)
+              )
+            ORDER BY r2.real_tgl ASC, r2.real_id ASC
+            LIMIT 1
+        )`;
+
         const list = await Realisasi.findAll({
             where,
+            attributes: {
+                include: [
+                    [sequelize.literal(subqueryCondition), "is_tindak_lanjut_flag"],
+                    [sequelize.literal(subqueryTgl), "tgl_tindak_lanjut"],
+                ],
+            },
             include: [
                 includeJadwal,
                 {
@@ -1030,33 +1070,17 @@ const getKendala = async (req, res, next) => {
             ],
         });
 
-        const data = await Promise.all(
-            list.map(async (item) => {
-                const plainObj = serializeRealisasi(item);
-                const handled = await Realisasi.findOne({
-                    where: {
-                        real_inv_id: item.real_inv_id,
-                        real_status: "Selesai",
-                        real_kondisi_akhir: "Baik",
-                        [Op.or]: [
-                            { real_tgl: { [Op.gt]: item.real_tgl } },
-                            {
-                                [Op.and]: [
-                                    { real_tgl: item.real_tgl },
-                                    { real_id: { [Op.gt]: item.real_id } },
-                                ],
-                            },
-                        ],
-                    },
-                    attributes: ["real_id", "real_tgl", "real_kondisi_akhir"],
-                });
-                plainObj.is_tindak_lanjut = handled ? 1 : 0;
-                plainObj.tindak_lanjut_info = handled
-                    ? `Unit telah direalisasikan kembali dengan kondisi Baik pada ${handled.real_tgl}`
-                    : null;
-                return plainObj;
-            }),
-        );
+        const data = list.map((item) => {
+            const plainObj = serializeRealisasi(item);
+            const isHandled = Boolean(Number(item.getDataValue("is_tindak_lanjut_flag") || 0));
+            const tglHandled = item.getDataValue("tgl_tindak_lanjut");
+
+            plainObj.is_tindak_lanjut = isHandled ? 1 : 0;
+            plainObj.tindak_lanjut_info = isHandled && tglHandled
+                ? `Unit telah direalisasikan kembali dengan kondisi Baik pada ${tglHandled}`
+                : null;
+            return plainObj;
+        });
 
         return response.ok(
             res,

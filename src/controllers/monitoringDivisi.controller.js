@@ -90,6 +90,7 @@ const getMonitoringDivisi = async (req, res, next) => {
                     "jdw_jenis_id",
                     "jdw_frekuensi",
                     "jdw_target",
+                    "jdw_gap_hari",
                     "jdw_tgl_mulai",
                     "jdw_tgl_selesai",
                     "jdw_pabrik_kode",
@@ -110,6 +111,15 @@ const getMonitoringDivisi = async (req, res, next) => {
                         "jdw_total_unit",
                     ],
                     [sequelize.literal(currentPeriodDoneCount), "jdw_selesai_unit"],
+                    [
+                        sequelize.literal(`(
+                            SELECT MAX(r.real_tgl)
+                            FROM plan_realisasi r
+                            WHERE r.real_jadwal_id = plan_jadwal.jdw_id
+                              AND r.real_status = 'Selesai'
+                        )`),
+                        "last_realisasi_tgl",
+                    ],
                 ],
                 include: [
                     {
@@ -158,11 +168,9 @@ const getMonitoringDivisi = async (req, res, next) => {
                         plain, startOfMonth, endOfMonth, holidays,
                     ).length;
 
-                    // Target per kemunculan: jdw_target, fallback ke total unit inventaris
-                    const perTarget =
-                        Number(plain.jdw_target || 0) > 0
-                            ? Number(plain.jdw_target)
-                            : Number(plain.jdw_total_unit || 0);
+                    const targetVal = Number(plain.jdw_target || 0);
+                    const liveTotalUnit = Number(plain.jdw_total_unit || 0);
+                    const perTarget = Math.max(targetVal, liveTotalUnit);
 
                     // Total target bulanan = kemunculan × target per kemunculan
                     const target = appearances * perTarget;

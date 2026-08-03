@@ -1061,9 +1061,23 @@ const getOne = async (req, res, next) => {
     }
 };
 
+let ensurePabrikKodeLengthDone = false;
+const ensurePabrikKodeLength = async () => {
+    if (ensurePabrikKodeLengthDone) return;
+    try {
+        await sequelize.query(
+            "ALTER TABLE plan_jadwal MODIFY COLUMN jdw_pabrik_kode VARCHAR(255) NULL"
+        );
+        ensurePabrikKodeLengthDone = true;
+    } catch (e) {
+        // Ignored
+    }
+};
+
 // POST /jadwal
 const create = async (req, res, next) => {
     try {
+        await ensurePabrikKodeLength();
         const {
             jdw_judul,
             jdw_jenis_id,
@@ -1221,6 +1235,7 @@ const create = async (req, res, next) => {
 // PUT /jadwal/:id
 const update = async (req, res, next) => {
     try {
+        await ensurePabrikKodeLength();
         const jadwalId = parsePositiveId(req.params.id);
         if (!jadwalId) return response.error(res, "Id jadwal tidak valid", 400);
 

@@ -68,7 +68,7 @@ module.exports = function (sequelize, DataTypes) {
                 },
             },
             jdw_pabrik_kode: {
-                type: DataTypes.STRING(10),
+                type: DataTypes.STRING(255),
                 allowNull: true,
             },
             jdw_status: {

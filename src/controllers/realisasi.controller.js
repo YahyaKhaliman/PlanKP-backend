@@ -20,6 +20,7 @@ const {
     getMonthNumber,
     getYear,
 } = require("../utils/date-helper");
+const { compressImageToTargetSize } = require("../utils/imageCompressor");
 
 const isAdminUser = (req) =>
     String(req.user?.user_jabatan || "").toLowerCase() === "admin";
@@ -858,7 +859,12 @@ const uploadFoto = async (req, res, next) => {
             return response.error(res, "File foto wajib diunggah", 400);
         }
 
-        const real = await Realisasi.findByPk(req.params.id);
+        const real = await Realisasi.findByPk(req.params.id, {
+            include: [
+                { model: User, as: "real_teknisi" },
+                { model: Inventaris, as: "real_inv" },
+            ],
+        });
         if (!real) {
             const newFilePath = path.join(
                 __dirname,
@@ -919,11 +925,45 @@ const uploadFoto = async (req, res, next) => {
             }
         }
 
-        // Simpan nama file ke database
-        real.real_foto = req.file.filename;
+        // Buat nama berkas terstandar: [Teknisi]_[Tanggal]_[Inventaris]_[Timestamp].[ext]
+        const sanitizeForFilename = (str) => {
+            if (!str) return "";
+            return String(str)
+                .trim()
+                .replace(/[^a-zA-Z0-9\-_]/g, "_")
+                .replace(/_+/g, "_");
+        };
+
+        const teknisiName = sanitizeForFilename(
+            real.real_teknisi?.user_nama || req.user?.user_nama || "Teknisi",
+        );
+        const tgl = sanitizeForFilename(
+            real.real_tgl || new Date().toISOString().slice(0, 10),
+        );
+        const invName = sanitizeForFilename(
+            real.real_inv?.inv_nama || real.real_inv?.inv_no || "Inventaris",
+        );
+
+        const ext = path.extname(req.file.filename).toLowerCase() || ".jpg";
+        const standardizedFilename = `${teknisiName}_${tgl}_${invName}_${Date.now()}${ext}`;
+
+        const uploadDir = path.join(__dirname, "../../public/image/realisasi");
+        const tempFilePath = path.join(uploadDir, req.file.filename);
+        const finalFilePath = path.join(uploadDir, standardizedFilename);
+
+        // Ubah nama file temp ke nama standar
+        if (fs.existsSync(tempFilePath)) {
+            fs.renameSync(tempFilePath, finalFilePath);
+        }
+
+        // Kompres gambar otomatis hingga maksimal 10 KB sebelum disimpan
+        await compressImageToTargetSize(finalFilePath, 10);
+
+        // Simpan nama file standar ke database
+        real.real_foto = standardizedFilename;
         await real.save();
 
-        const fileUrl = `${req.protocol}://${req.get("host")}/public/image/realisasi/${req.file.filename}`;
+        const fileUrl = `${req.protocol}://${req.get("host")}/public/image/realisasi/${standardizedFilename}`;
         return response.ok(
             res,
             { real_foto: fileUrl },

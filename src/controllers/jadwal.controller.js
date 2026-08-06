@@ -950,8 +950,9 @@ const getOne = async (req, res, next) => {
             }
         }
 
-        // ambil inventaris dengan jenis yang sama
+        // ambil inventaris dengan jenis yang sama (disaring unit yang belum di-realisasi hari ini)
         const pabrikCodes = splitPabrikCodes(data.jdw_pabrik_kode);
+        const todayStr = formatDateOnlyLocal(new Date());
 
         const inventarisWhere = {
             inv_jenis_id: data.jdw_jenis_id,
@@ -959,6 +960,14 @@ const getOne = async (req, res, next) => {
             ...(pabrikCodes.length > 0
                 ? { inv_pabrik_kode: { [Op.in]: pabrikCodes } }
                 : {}),
+            inv_id: {
+                [Op.notIn]: sequelize.literal(`(
+                    SELECT r.real_inv_id
+                    FROM plan_realisasi r
+                    WHERE r.real_tgl = '${todayStr}'
+                      AND r.real_status IN ('Draft', 'Submitted', 'Approved', 'Selesai')
+                )`),
+            },
         };
 
         const inventarisList = await Inventaris.findAll({

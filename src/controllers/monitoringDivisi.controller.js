@@ -170,7 +170,7 @@ const getMonitoringDivisi = async (req, res, next) => {
 
                     const targetVal = Number(plain.jdw_target || 0);
                     const liveTotalUnit = Number(plain.jdw_total_unit || 0);
-                    const perTarget = Math.max(targetVal, liveTotalUnit);
+                    const perTarget = targetVal > 0 ? targetVal : liveTotalUnit;
 
                     // Total target bulanan = kemunculan × target per kemunculan
                     const target = appearances * perTarget;

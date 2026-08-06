@@ -122,19 +122,6 @@ const getHolidaysForMonth = async (year, month, divisi = null) => {
         });
     }
 
-    // Jika BUKAN divisi 6 hari kerja (misal 5 hari kerja atau default),
-    // tambahkan semua hari Sabtu di bulan tersebut sebagai hari libur
-    if (!is6DaysDivisi(divisi)) {
-        const totalDays = monthEndDate.getDate();
-        for (let d = 1; d <= totalDays; d++) {
-            const dt = new Date(year, month - 1, d);
-            if (dt.getDay() === 6) {
-                // Sabtu
-                holidays.add(d);
-            }
-        }
-    }
-
     return holidays;
 };
 
@@ -567,7 +554,7 @@ const getDashboardSummary = async (req, res, next) => {
             const count = dates.length;
             const targetVal = Number(plain.jdw_target || 0);
             const liveTotalUnit = Number(plain.jdw_total_unit || 0);
-            const perTarget = Math.max(targetVal, liveTotalUnit);
+            const perTarget = targetVal > 0 ? targetVal : liveTotalUnit;
             totalTargetBulanIni += count * perTarget;
         }
 

@@ -147,18 +147,17 @@ const calculateJadwalCountdown = ({
         };
     }
 
+    // Jika periode berjalan belum terpenuhi (belum clear), nextDueDate merujuk ke hari ini (todayDate).
+    // Jika sudah terpenuhi (clear/selesai), nextDueDate melompat ke tanggal jadwal periode berikutnya.
     const dueDate = periodFulfilled
         ? addByFrequency(periodAnchor, frekuensi, 1)
-        : periodAnchor;
+        : todayDate;
     let daysRemaining = dueDate
         ? Math.floor((dueDate - todayDate) / 86400000)
         : null;
 
-    // Untuk periode yang sedang berjalan, tampilkan minimal "hari ini" (0),
-    // tetapi tidak berlaku untuk jadwal yang belum mulai (sudah ditangani di atas).
     if (
         !periodFulfilled &&
-        (frekuensi === "Mingguan" || frekuensi === "Bulanan") &&
         daysRemaining != null &&
         daysRemaining < 0
     ) {

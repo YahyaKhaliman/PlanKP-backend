@@ -571,6 +571,7 @@ const getDashboardSummary = async (req, res, next) => {
         )`;
 
         const kendalaWhere = {
+            real_status: "Selesai",
             real_kondisi_akhir: {
                 [Op.in]: ["Rusak", "Perlu Perhatian"],
             },

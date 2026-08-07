@@ -21,6 +21,10 @@ const {
     getYear,
 } = require("../utils/date-helper");
 const { compressImageToTargetSize } = require("../utils/imageCompressor");
+const {
+    getEffectiveScheduleDatesInMonth,
+    getHolidaysForMonth,
+} = require("./system.controller");
 
 const isAdminUser = (req) =>
     String(req.user?.user_jabatan || "").toLowerCase() === "admin";
@@ -105,7 +109,9 @@ const serializeRealisasi = (item) => {
         plain.hasil_checklist = plain.plan_hasil_checklists
             .map(serializeChecklist)
             .filter((c) => c !== null)
-            .sort((left, right) => (left.hc_ct_id || 0) - (right.hc_ct_id || 0));
+            .sort(
+                (left, right) => (left.hc_ct_id || 0) - (right.hc_ct_id || 0),
+            );
     }
     return plain;
 };
@@ -114,6 +120,7 @@ const getAll = async (req, res, next) => {
     try {
         const {
             jadwal_id,
+            inv_id,
             status,
             bulan,
             tahun,
@@ -140,6 +147,7 @@ const getAll = async (req, res, next) => {
             ],
         };
         if (jadwal_id) where.real_jadwal_id = jadwal_id;
+        if (inv_id) where.real_inv_id = inv_id;
         if (status) where.real_status = status;
         if (bulan) where.real_bulan = bulan;
         if (tahun) where.real_tahun = tahun;
@@ -156,7 +164,11 @@ const getAll = async (req, res, next) => {
         }
 
         let targetDivisi = null;
-        if (divisi && String(divisi).toLowerCase() !== "true" && String(divisi).toLowerCase() !== "false") {
+        if (
+            divisi &&
+            String(divisi).toLowerCase() !== "true" &&
+            String(divisi).toLowerCase() !== "false"
+        ) {
             targetDivisi = divisi;
         } else if (by_divisi) {
             if (String(by_divisi).toLowerCase() === "true") {
@@ -172,9 +184,10 @@ const getAll = async (req, res, next) => {
             includeJadwal.where = { jdw_divisi: targetDivisi };
         }
 
-        const excludeAttrs = String(req.query.include_ttd).toLowerCase() === "true"
-            ? []
-            : ["real_ttd_data"];
+        const excludeAttrs =
+            String(req.query.include_ttd).toLowerCase() === "true"
+                ? []
+                : ["real_ttd_data"];
 
         const includes = [
             includeJadwal,
@@ -509,10 +522,6 @@ const validateRealisasiEligibility = async (
     const jenis = await Jenis.findByPk(jadwal.jdw_jenis_id, {
         attributes: ["jenis_id", "jenis_gap_hari"],
     });
-    // Gap level JENIS (per unit inventaris): mencegah unit yang sama di-service
-    // terlalu sering, terlepas dari jadwal mana.
-    // Contoh: jenis_gap_hari=7 berarti setelah unit X di-service,
-    // harus menunggu 7 hari sebelum unit X bisa di-service lagi.
     const gapHari = Number(jenis?.jenis_gap_hari || 0);
     if (gapHari > 0) {
         const lastSelesai = await Realisasi.findOne({
@@ -554,7 +563,8 @@ const validateRealisasiEligibility = async (
                 real_status: "Selesai",
             },
         });
-        const isCycleCompleted = targetCount > 0 ? totalSelesaiJadwal >= targetCount : true;
+        const isCycleCompleted =
+            targetCount > 0 ? totalSelesaiJadwal >= targetCount : true;
 
         if (isCycleCompleted) {
             const lastSelesaiJadwal = await Realisasi.findOne({
@@ -988,27 +998,11 @@ const getKendala = async (req, res, next) => {
     try {
         const { divisi, bulan, tahun, tindak_lanjut } = req.query;
         const where = {
+            real_status: "Selesai",
             real_kondisi_akhir: {
                 [Op.in]: ["Rusak", "Perlu Perhatian"],
             },
         };
-
-        const subqueryCondition = `EXISTS (
-            SELECT 1 FROM plan_realisasi r2
-            WHERE r2.real_inv_id = plan_realisasi.real_inv_id
-              AND r2.real_status = 'Selesai'
-              AND r2.real_kondisi_akhir = 'Baik'
-              AND (
-                r2.real_tgl > plan_realisasi.real_tgl
-                OR (r2.real_tgl = plan_realisasi.real_tgl AND r2.real_id > plan_realisasi.real_id)
-              )
-        )`;
-
-        if (tindak_lanjut === "1") {
-            where[Op.and] = [sequelize.literal(subqueryCondition)];
-        } else if (tindak_lanjut === "0") {
-            where[Op.and] = [sequelize.literal(`NOT (${subqueryCondition})`)];
-        }
 
         if (bulan) where.real_bulan = bulan;
         if (tahun) where.real_tahun = tahun;
@@ -1031,7 +1025,11 @@ const getKendala = async (req, res, next) => {
         };
 
         let targetDivisiKendala = null;
-        if (divisi && String(divisi).toLowerCase() !== "true" && String(divisi).toLowerCase() !== "false") {
+        if (
+            divisi &&
+            String(divisi).toLowerCase() !== "true" &&
+            String(divisi).toLowerCase() !== "false"
+        ) {
             targetDivisiKendala = divisi;
         } else if (req.query.by_divisi) {
             if (String(req.query.by_divisi).toLowerCase() === "true") {
@@ -1047,27 +1045,9 @@ const getKendala = async (req, res, next) => {
             includeJadwal.where = { jdw_divisi: targetDivisiKendala };
         }
 
-        const subqueryTgl = `(
-            SELECT r2.real_tgl FROM plan_realisasi r2
-            WHERE r2.real_inv_id = plan_realisasi.real_inv_id
-              AND r2.real_status = 'Selesai'
-              AND r2.real_kondisi_akhir = 'Baik'
-              AND (
-                r2.real_tgl > plan_realisasi.real_tgl
-                OR (r2.real_tgl = plan_realisasi.real_tgl AND r2.real_id > plan_realisasi.real_id)
-              )
-            ORDER BY r2.real_tgl ASC, r2.real_id ASC
-            LIMIT 1
-        )`;
-
+        // 1. Fetch data kendala tanpa subquery correlated yang membebankan database
         const list = await Realisasi.findAll({
             where,
-            attributes: {
-                include: [
-                    [sequelize.literal(subqueryCondition), "is_tindak_lanjut_flag"],
-                    [sequelize.literal(subqueryTgl), "tgl_tindak_lanjut"],
-                ],
-            },
             include: [
                 includeJadwal,
                 {
@@ -1110,17 +1090,67 @@ const getKendala = async (req, res, next) => {
             ],
         });
 
-        const data = list.map((item) => {
+        if (list.length === 0) {
+            return response.ok(
+                res,
+                [],
+                "Berhasil mengambil data kendala maintenance",
+            );
+        }
+
+        // 2. Batching query tindak lanjut per inv_id (Hanya 1 query batch ringan untuk semua item)
+        const invIds = [...new Set(list.map((r) => r.real_inv_id))];
+        const nextBaikList = await Realisasi.findAll({
+            where: {
+                real_inv_id: { [Op.in]: invIds },
+                real_status: "Selesai",
+                real_kondisi_akhir: "Baik",
+            },
+            attributes: ["real_inv_id", "real_tgl", "real_id"],
+            order: [
+                ["real_tgl", "ASC"],
+                ["real_id", "ASC"],
+            ],
+            raw: true,
+        });
+
+        // Grouping data tindak lanjut per inv_id di JS Memory
+        const nextBaikMap = {};
+        for (const nb of nextBaikList) {
+            if (!nextBaikMap[nb.real_inv_id]) nextBaikMap[nb.real_inv_id] = [];
+            nextBaikMap[nb.real_inv_id].push(nb);
+        }
+
+        // 3. Match status tindak lanjut secara cepat di JS Memory
+        let data = list.map((item) => {
             const plainObj = serializeRealisasi(item);
-            const isHandled = Boolean(Number(item.getDataValue("is_tindak_lanjut_flag") || 0));
-            const tglHandled = item.getDataValue("tgl_tindak_lanjut");
+            const invFollowUps = nextBaikMap[item.real_inv_id] || [];
+
+            // Cari tindak lanjut perbaikan pertama yang berkondisi "Baik" setelah tanggal kendala ini
+            const nextBaik = invFollowUps.find((nb) => {
+                if (nb.real_tgl > item.real_tgl) return true;
+                if (nb.real_tgl === item.real_tgl && nb.real_id > item.real_id)
+                    return true;
+                return false;
+            });
+
+            const isHandled = Boolean(nextBaik);
+            const tglHandled = nextBaik ? nextBaik.real_tgl : null;
 
             plainObj.is_tindak_lanjut = isHandled ? 1 : 0;
-            plainObj.tindak_lanjut_info = isHandled && tglHandled
-                ? `Unit telah direalisasikan kembali dengan kondisi Baik pada ${tglHandled}`
-                : null;
+            plainObj.tindak_lanjut_info =
+                isHandled && tglHandled
+                    ? `Unit telah direalisasikan kembali dengan kondisi Baik pada ${tglHandled}`
+                    : null;
             return plainObj;
         });
+
+        // Filter status tindak lanjut (1 / 0) jika parameter dikirim
+        if (tindak_lanjut === "1") {
+            data = data.filter((item) => item.is_tindak_lanjut === 1);
+        } else if (tindak_lanjut === "0") {
+            data = data.filter((item) => item.is_tindak_lanjut === 0);
+        }
 
         return response.ok(
             res,
@@ -1174,7 +1204,11 @@ const exportExcel = async (req, res, next) => {
         }
 
         let targetDivisi = null;
-        if (divisi && String(divisi).toLowerCase() !== "true" && String(divisi).toLowerCase() !== "false") {
+        if (
+            divisi &&
+            String(divisi).toLowerCase() !== "true" &&
+            String(divisi).toLowerCase() !== "false"
+        ) {
             targetDivisi = divisi;
         } else if (by_divisi) {
             if (String(by_divisi).toLowerCase() === "true") {
@@ -1208,7 +1242,7 @@ const exportExcel = async (req, res, next) => {
                     include: [
                         {
                             model: Jenis,
-                            as: "inv_jenis",
+                            as: "jenis",
                             attributes: ["jenis_nama"],
                         },
                     ],
@@ -1224,7 +1258,10 @@ const exportExcel = async (req, res, next) => {
                     ],
                 },
             ],
-            order: [["real_tgl", "DESC"], ["real_id", "DESC"]],
+            order: [
+                ["real_tgl", "DESC"],
+                ["real_id", "DESC"],
+            ],
         });
 
         // Filter teknisi nama jika teknisi_id dipasang
@@ -1245,97 +1282,170 @@ const exportExcel = async (req, res, next) => {
             pageSetup: { paperSize: 9, orientation: "landscape" },
         });
 
-        // Title Block
-        const titleRow = sheet.addRow(["LAPORAN REALISASI MAINTENANCE - PLAN KP"]);
-        titleRow.font = { name: "Calibri", size: 16, bold: true, color: { argb: "1E293B" } };
-        sheet.mergeCells("A1:N1");
-
         const months = [
-            "Januari", "Februari", "Maret", "April", "Mei", "Juni",
-            "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+            "Januari",
+            "Februari",
+            "Maret",
+            "April",
+            "Mei",
+            "Juni",
+            "Juli",
+            "Agustus",
+            "September",
+            "Oktober",
+            "November",
+            "Desember",
         ];
-        const monthLabel = bulan ? months[Number(bulan) - 1] || bulan : "Semua Bulan";
+        const monthLabel = bulan
+            ? months[Number(bulan) - 1] || bulan
+            : "Semua Bulan";
         const yearLabel = tahun || "Semua Tahun";
         const divisiLabel = targetDivisi || "Semua Divisi";
 
-        const infoRow = sheet.addRow([
-            `Periode: ${monthLabel} ${yearLabel} | Divisi: ${divisiLabel} | Pelaksana: ${filterTeknisiNama}`
-        ]);
-        infoRow.font = { name: "Calibri", size: 11, italic: true, color: { argb: "475569" } };
-        sheet.mergeCells("A2:N2");
+        const now = new Date();
+        const d = String(now.getDate()).padStart(2, "0");
+        const m = String(now.getMonth() + 1).padStart(2, "0");
+        const y = now.getFullYear();
+        const hh = String(now.getHours()).padStart(2, "0");
+        const mm = String(now.getMinutes()).padStart(2, "0");
+        const printStr = `${d}/${m}/${y} ${hh}:${mm}`;
 
-        const nowStr = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
-        const printRow = sheet.addRow([`Tanggal Cetak: ${nowStr}`]);
-        printRow.font = { name: "Calibri", size: 9, italic: true, color: { argb: "64748B" } };
-        sheet.mergeCells("A3:N3");
+        // ── Row 1: Header Perusahaan & Tanggal Cetak (Compact Header) ─────────────
+        sheet.getCell("A1").value =
+            "CV. KENCANA PRINT — LAPORAN REALISASI MAINTENANCE";
+        sheet.getCell("A1").font = {
+            name: "Calibri",
+            size: 12,
+            bold: true,
+            color: { argb: "285AC8" },
+        };
+        sheet.mergeCells("A1:I1");
 
-        sheet.addRow([]); // Blank row 4
+        sheet.getCell("J1").value = `Dicetak: ${printStr}`;
+        sheet.getCell("J1").font = {
+            name: "Calibri",
+            size: 9,
+            color: { argb: "64748B" },
+        };
+        sheet.getCell("J1").alignment = {
+            vertical: "middle",
+            horizontal: "right",
+        };
+        sheet.mergeCells("J1:M1");
 
-        // KPI Summary Block on Rows 5-6 with Excel Formulas
-        const kpiHeaderRow = sheet.addRow([
-            "TOTAL REALISASI", "", "KONDISI BAIK", "", "PERLU PERHATIAN", "", "KONDISI RUSAK", ""
-        ]);
-        kpiHeaderRow.font = { name: "Calibri", size: 9, bold: true, color: { argb: "475569" } };
-        sheet.mergeCells("A5:B5");
-        sheet.mergeCells("C5:D5");
-        sheet.mergeCells("E5:F5");
-        sheet.mergeCells("G5:H5");
+        // ── Hitung total target unit & persentase capaian secara presisi ───────────
+        let totalTargetUnit = 0;
+        if (bulan && tahun) {
+            const mNum = Number(bulan);
+            const yNum = Number(tahun);
+            const startDate = new Date(yNum, mNum - 1, 1);
+            const endDate = new Date(yNum, mNum, 0);
+            const holidays = await getHolidaysForMonth(yNum, mNum);
 
-        const totalRowsCount = data.length;
-        const lastRowIndex = 9 + (totalRowsCount > 0 ? totalRowsCount : 1);
+            const jadwalWhere = {
+                jdw_status: { [Op.in]: ["Draft", "Aktif"] },
+            };
+            if (targetDivisi) {
+                jadwalWhere.jdw_divisi = targetDivisi;
+            }
 
-        const kpiValueRow = sheet.addRow([]);
-        kpiValueRow.font = { name: "Calibri", size: 14, bold: true };
+            const activeJadwalList = await Jadwal.findAll({
+                where: jadwalWhere,
+            });
 
-        // Total formula: COUNTA on column A (from A10 to last row)
-        sheet.getCell("A6").value = { formula: `COUNTA(A10:A${lastRowIndex})` };
-        sheet.getCell("A6").font = { name: "Calibri", size: 14, bold: true, color: { argb: "0F172A" } };
-        sheet.mergeCells("A6:B6");
+            for (const j of activeJadwalList) {
+                if (j.jdw_tgl_mulai) {
+                    const tglMulai = new Date(j.jdw_tgl_mulai);
+                    if (!isNaN(tglMulai.getTime()) && tglMulai > endDate)
+                        continue;
+                }
+                if (j.jdw_tgl_selesai) {
+                    const tglSelesai = new Date(j.jdw_tgl_selesai);
+                    if (!isNaN(tglSelesai.getTime()) && tglSelesai < startDate)
+                        continue;
+                }
 
-        // Baik formula: COUNTIF on Column K ("Baik")
-        sheet.getCell("C6").value = { formula: `COUNTIF(K10:K${lastRowIndex}, "Baik")` };
-        sheet.getCell("C6").font = { name: "Calibri", size: 14, bold: true, color: { argb: "16A34A" } };
-        sheet.mergeCells("C6:D6");
+                const perTarget =
+                    j.jdw_target && j.jdw_target > 0
+                        ? j.jdw_target
+                        : j.jdw_total_unit && j.jdw_total_unit > 0
+                          ? j.jdw_total_unit
+                          : 1;
+                const appearances = getEffectiveScheduleDatesInMonth(
+                    j,
+                    startDate,
+                    endDate,
+                    holidays,
+                );
+                totalTargetUnit += appearances.length * perTarget;
+            }
+        }
 
-        // Perlu Perhatian formula: COUNTIF on Column K ("Perlu Perhatian")
-        sheet.getCell("E6").value = { formula: `COUNTIF(K10:K${lastRowIndex}, "Perlu Perhatian")` };
-        sheet.getCell("E6").font = { name: "Calibri", size: 14, bold: true, color: { argb: "D97706" } };
-        sheet.mergeCells("E6:F6");
+        const totalRealisasi = data.length;
+        const targetVal =
+            totalTargetUnit > 0
+                ? totalTargetUnit
+                : totalRealisasi > 0
+                  ? totalRealisasi
+                  : 1;
+        const percentage = Math.min(
+            100,
+            Math.max(0, Math.round((totalRealisasi / targetVal) * 100)),
+        );
 
-        // Rusak formula: COUNTIF on Column K ("Rusak")
-        sheet.getCell("G6").value = { formula: `COUNTIF(K10:K${lastRowIndex}, "Rusak")` };
-        sheet.getCell("G6").font = { name: "Calibri", size: 14, bold: true, color: { argb: "DC2626" } };
-        sheet.mergeCells("G6:H6");
+        // ── Row 2: Ringkasan Filter & KPI Maintenance Streamlined ─────────────────
+        sheet.getCell("A2").value =
+            `Divisi: ${divisiLabel}  |  Periode: ${monthLabel} ${yearLabel}  |  Pelaksana: ${filterTeknisiNama}  |  Realisasi/Target: ${totalRealisasi}/${targetVal} (Capaian: ${percentage}%)`;
+        sheet.getCell("A2").font = {
+            name: "Calibri",
+            size: 9.5,
+            bold: true,
+            color: { argb: "0F172A" },
+        };
+        sheet.mergeCells("A2:M2");
 
-        sheet.addRow([]); // Blank row 7
-        sheet.addRow([]); // Blank row 8
+        // ── Row 3: Accent Border Line Primary Blue ─────────────────────────────────
+        for (let col = 1; col <= 13; col++) {
+            const cell = sheet.getCell(3, col);
+            cell.border = {
+                bottom: { style: "medium", color: { argb: "285AC8" } },
+            };
+        }
 
-        // Table Header Row at Row 9
+        // ── Row 4: Table Header Row (Data dimulai langsung di Row 5!) ──────────────
         const headers = [
-            "No",
-            "Tanggal",
-            "Jam Selesai",
-            "Divisi",
-            "Teknisi / Pelaksana",
-            "No. Inventaris",
-            "Nama Inventaris",
-            "Jenis Inventaris",
-            "Pabrik / Lokasi",
-            "Frekuensi Jadwal",
-            "Kondisi Akhir",
-            "Temuan / Catatan Kendala",
-            "Nama PIC (TTD)",
-            "Status Realisasi"
+            "No", // Col 1
+            "Tgl Realisasi", // Col 2
+            "Divisi", // Col 3
+            "Pelaksana", // Col 4
+            "Serial Number", // Col 5
+            "Nama Inventaris", // Col 6
+            "Jenis Inventaris", // Col 7
+            "Pabrik", // Col 8
+            "Frekuensi Jadwal", // Col 9
+            "Kondisi Akhir", // Col 10
+            "Catatan", // Col 11
+            "Nama PIC (TTD)", // Col 12
+            "Status Realisasi", // Col 13
         ];
-        const headerRow = sheet.addRow(headers);
-        headerRow.font = { name: "Calibri", size: 11, bold: true, color: { argb: "FFFFFF" } };
+
+        const headerRow = sheet.getRow(4);
+        headers.forEach((h, idx) => {
+            headerRow.getCell(idx + 1).value = h;
+        });
+        headerRow.font = {
+            name: "Calibri",
+            size: 10.5,
+            bold: true,
+            color: { argb: "FFFFFF" },
+        };
         headerRow.height = 24;
 
         headerRow.eachCell((cell) => {
             cell.fill = {
                 type: "pattern",
                 pattern: "solid",
-                fgColor: { argb: "1E293B" } // Dark Slate
+                fgColor: { argb: "1E293B" }, // Dark Slate Steel
             };
             cell.alignment = { vertical: "middle", horizontal: "center" };
             cell.border = {
@@ -1346,43 +1456,85 @@ const exportExcel = async (req, res, next) => {
             };
         });
 
-        // Data Rows starting Row 10
+        // Fitur AutoFilter & Freeze Panes (Row 4 sebagai batas freeze)
+        sheet.autoFilter = "A4:M4";
+        sheet.views = [{ state: "frozen", xSplit: 0, ySplit: 4 }];
+
+        // Data Rows Detail Realisasi (Pengisian Nilai Kolom 1 s/d 13)
         data.forEach((item, index) => {
             const r = item.get({ plain: true });
             const inv = r.real_inv || {};
-            const jenis = inv.inv_jenis || {};
+            const jenis = inv.jenis || inv.inv_jenis || {};
             const teknisi = r.real_teknisi || {};
             const jadwal = r.real_jadwal || {};
 
-            const tglStr = formatDateDisplay(r.real_tgl ? new Date(r.real_tgl) : null);
-            const jamStr = r.real_jam_selesai || r.real_jam_mulai || "-";
-            const divisiStr = r.real_divisi || jadwal.jdw_divisi || teknisi.user_divisi || "-";
+            // Col 2: Format tanggal pelaksanaan (DD/MM/YYYY)
+            const tglStr = formatDateDisplay(
+                r.real_tgl ? new Date(r.real_tgl) : null,
+            );
+            // Col 3: Divisi pelaksana/jadwal/teknisi
+            const divisiStr =
+                r.real_divisi ||
+                jadwal.jdw_divisi ||
+                teknisi.user_divisi ||
+                "-";
+            // Col 4: Nama teknisi pelaksana maintenance
             const teknisiNama = teknisi.user_nama || r.real_ttd_pic_nama || "-";
-            const noInv = inv.inv_no || "-";
-            const namaInv = inv.inv_nama || "-";
-            const jenisNama = jenis.jenis_nama || "-";
-            const pabrikKode = inv.inv_pabrik_kode || "-";
-            const frekuensi = jadwal.jdw_frekuensi || "-";
-            const kondisi = r.real_kondisi_akhir || "Baik";
-            const catatan = r.real_keterangan || "-";
-            const picNama = r.real_ttd_pic_nama || "-";
-            const statusStr = r.real_status || "Selesai";
+            // Col 5: Serial Number inventaris
+            const serialNumber = inv.inv_serial_number || inv.inv_no || "-";
 
+            // Col 6 & 7: Nama inventaris gabungan ($namaJenis $namaInventaris) dan jenis inventaris
+            const rawNamaInv = (inv.inv_nama || "").trim();
+            const jenisNama = (jenis.jenis_nama || "").trim();
+            let fullNamaInv = rawNamaInv || "-";
+            if (jenisNama && rawNamaInv) {
+                if (
+                    rawNamaInv.toLowerCase().startsWith(jenisNama.toLowerCase())
+                ) {
+                    fullNamaInv = rawNamaInv;
+                } else {
+                    fullNamaInv = `${jenisNama} ${rawNamaInv}`;
+                }
+            } else if (jenisNama) {
+                fullNamaInv = jenisNama;
+            }
+
+            // Col 8: Lokasi pabrik unit
+            const pabrikKode = inv.inv_pabrik_kode || "-";
+            // Col 9: Frekuensi jadwal maintenance (Harian/Mingguan/etc)
+            const frekuensi = jadwal.jdw_frekuensi || "-";
+            // Col 10: Kondisi akhir unit (Baik / Perlu Perhatian / Rusak)
+            const kondisi = r.real_kondisi_akhir || "Baik";
+            // Col 11: Catatan temuan / kendala teknisi
+            const catatan = r.real_keterangan || "-";
+            // Col 12: Nama penanggung jawab / PIC yang menandatangani
+            const picNama = r.real_ttd_pic_nama || "-";
+
+            // Col 13: Label status realisasi (mapping per real_status)
+            const rawStatus = (r.real_status || "Draft").toString().trim();
+            const statusMap = {
+                Draft:     "Belum TTD PIC",
+                Submitted: "Menunggu Approval",
+                Approved:  "Disetujui",
+                Selesai:   "Selesai",
+            };
+            const statusStr = statusMap[rawStatus] ?? rawStatus;
+
+            // Masukkan data baris ke sheet Excel (Kolom A s/d M)
             const row = sheet.addRow([
-                index + 1,
-                tglStr,
-                jamStr,
-                divisiStr,
-                teknisiNama,
-                noInv,
-                namaInv,
-                jenisNama,
-                pabrikKode,
-                frekuensi,
-                kondisi,
-                catatan,
-                picNama,
-                statusStr
+                index + 1, // Col 1: No
+                tglStr, // Col 2: Tanggal Realisasi
+                divisiStr, // Col 3: Divisi
+                teknisiNama, // Col 4: Teknisi / Pelaksana
+                serialNumber, // Col 5: Serial Number
+                fullNamaInv, // Col 6: Nama Inventaris ($namaJenis $namaInventaris)
+                jenisNama, // Col 7: Jenis Inventaris
+                pabrikKode, // Col 8: Pabrik / Lokasi
+                frekuensi, // Col 9: Frekuensi Jadwal
+                kondisi, // Col 10: Kondisi Akhir
+                catatan, // Col 11: Catatan
+                picNama, // Col 12: Nama PIC (TTD)
+                statusStr, // Col 13: Status Realisasi
             ]);
 
             const isEven = index % 2 === 0;
@@ -1392,7 +1544,7 @@ const exportExcel = async (req, res, next) => {
                 cell.fill = {
                     type: "pattern",
                     pattern: "solid",
-                    fgColor: { argb: bgHex }
+                    fgColor: { argb: bgHex },
                 };
                 cell.border = {
                     top: { style: "thin", color: { argb: "E2E8F0" } },
@@ -1402,14 +1554,20 @@ const exportExcel = async (req, res, next) => {
                 };
                 cell.alignment = { vertical: "middle", horizontal: "left" };
 
-                // Center align columns 1, 2, 3, 9, 10, 14
-                if ([1, 2, 3, 9, 10, 14].includes(colNumber)) {
-                    cell.alignment = { vertical: "middle", horizontal: "center" };
+                // Center align columns 1, 2, 8, 9, 10, 13
+                if ([1, 2, 8, 9, 10, 13].includes(colNumber)) {
+                    cell.alignment = {
+                        vertical: "middle",
+                        horizontal: "center",
+                    };
                 }
 
-                // Kondisi Akhir Styling
-                if (colNumber === 11) {
-                    cell.alignment = { vertical: "middle", horizontal: "center" };
+                // Kondisi Akhir Styling (Kolom 10 / J)
+                if (colNumber === 10) {
+                    cell.alignment = {
+                        vertical: "middle",
+                        horizontal: "center",
+                    };
                     cell.font = { bold: true };
                     if (kondisi === "Baik") {
                         cell.font = { bold: true, color: { argb: "16A34A" } };
@@ -1431,18 +1589,19 @@ const exportExcel = async (req, res, next) => {
                     maxLength = valStr.length;
                 }
             });
-            column.width = Math.max(maxLength + 4, 12);
+            column.width = Math.max(maxLength + 4, 14);
         });
 
-        const filename = `Laporan_Realisasi_${tahun || "Semua"}_${bulan || "Semua"}.xlsx`;
+        const safeDivisiFile = divisiLabel.replace(/[^a-zA-Z0-9]/g, "_");
+        const filename = `Laporan_Maintenance_${safeDivisiFile}_${monthLabel}_${yearLabel}.xlsx`;
 
         res.setHeader(
             "Content-Type",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         );
         res.setHeader(
             "Content-Disposition",
-            `attachment; filename="${filename}"`
+            `attachment; filename="${filename}"`,
         );
 
         await workbook.xlsx.write(res);

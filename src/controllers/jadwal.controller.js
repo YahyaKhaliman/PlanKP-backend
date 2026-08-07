@@ -950,9 +950,8 @@ const getOne = async (req, res, next) => {
             }
         }
 
-        // ambil inventaris dengan jenis yang sama (disaring unit yang belum di-realisasi hari ini)
+        // ambil inventaris dengan jenis yang sama
         const pabrikCodes = splitPabrikCodes(data.jdw_pabrik_kode);
-        const todayStr = formatDateOnlyLocal(new Date());
 
         const inventarisWhere = {
             inv_jenis_id: data.jdw_jenis_id,
@@ -960,14 +959,6 @@ const getOne = async (req, res, next) => {
             ...(pabrikCodes.length > 0
                 ? { inv_pabrik_kode: { [Op.in]: pabrikCodes } }
                 : {}),
-            inv_id: {
-                [Op.notIn]: sequelize.literal(`(
-                    SELECT r.real_inv_id
-                    FROM plan_realisasi r
-                    WHERE r.real_tgl = '${todayStr}'
-                      AND r.real_status IN ('Draft', 'Submitted', 'Approved', 'Selesai')
-                )`),
-            },
         };
 
         const inventarisList = await Inventaris.findAll({
@@ -1047,6 +1038,28 @@ const getOne = async (req, res, next) => {
                 });
             }
         }
+
+        // Hitung unit inventaris yang SUDAH direalisasikan hari ini di plan_realisasi (oleh user mana pun)
+        const doneRows = await sequelize.query(
+            `
+            SELECT DISTINCT r.real_inv_id
+            FROM plan_realisasi r
+            WHERE r.real_tgl = CURDATE()
+              AND r.real_status IN ('Draft', 'Submitted', 'Approved', 'Selesai')
+            `,
+            {
+                type: QueryTypes.SELECT,
+            },
+        );
+
+        const doneInvIdSet = new Set(
+            doneRows.map((row) => Number(row.real_inv_id)),
+        );
+
+        inventoryWithGap = inventoryWithGap.map((inv) => ({
+            ...inv,
+            inv_is_done_current_period: doneInvIdSet.has(Number(inv.inv_id)),
+        }));
 
         const eligibleInventaris = inventoryWithGap.filter(
             (inv) => inv.inv_is_gap_eligible,

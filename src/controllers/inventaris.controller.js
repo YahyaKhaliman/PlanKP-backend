@@ -1,10 +1,52 @@
 const {
     plan_inventaris: Inventaris,
     plan_jenis: Jenis,
+    plan_jadwal: Jadwal,
     sequelize,
 } = require("../models");
 const { Op } = require("sequelize");
 const response = require("../utils/response");
+
+// Helper sinkronisasi target unit otomatis pada semua jadwal aktif yang mengacu pada jenis inventaris ini
+const syncJadwalTargetForJenis = async (jenisId) => {
+    if (!jenisId) return;
+    try {
+        const jadwals = await Jadwal.findAll({
+            where: {
+                jdw_jenis_id: jenisId,
+                jdw_status: "Draft",
+            },
+        });
+
+        for (const jdw of jadwals) {
+            let pabrikList = [];
+            if (jdw.jdw_pabrik_kode) {
+                pabrikList = jdw.jdw_pabrik_kode
+                    .split(",")
+                    .map((p) => p.trim().toUpperCase())
+                    .filter(Boolean);
+            }
+
+            const invWhere = {
+                inv_jenis_id: jenisId,
+                inv_is_active: 1,
+            };
+            if (pabrikList.length > 0) {
+                invWhere.inv_pabrik_kode = { [Op.in]: pabrikList };
+            }
+
+            const count = await Inventaris.count({ where: invWhere });
+            const newTarget = count > 0 ? count : 1;
+
+            if (jdw.jdw_target !== newTarget) {
+                jdw.jdw_target = newTarget;
+                await jdw.save();
+            }
+        }
+    } catch (e) {
+        console.error("Gagal sinkronisasi auto target jadwal:", e);
+    }
+};
 
 const findActiveJenis = async (jenisId, adminScope) => {
     const where = {
@@ -146,6 +188,8 @@ const create = async (req, res, next) => {
             );
         }
 
+        const isAdmin = req.user?.user_jabatan === "admin";
+
         const data = await Inventaris.create({
             inv_no,
             inv_nama,
@@ -157,8 +201,12 @@ const create = async (req, res, next) => {
             inv_tgl_beli,
             inv_kondisi,
             inv_notes,
-            inv_is_active: inv_is_active !== undefined ? inv_is_active : 1,
+            inv_is_active: isAdmin && inv_is_active !== undefined ? inv_is_active : 1,
         });
+
+        // Sinkronisasi target otomatis pada semua jadwal terkait
+        await syncJadwalTargetForJenis(inv_jenis_id);
+
         return response.created(res, data, "Inventaris berhasil ditambahkan");
     } catch (err) {
         next(err);
@@ -171,6 +219,9 @@ const update = async (req, res, next) => {
         const data = await Inventaris.findByPk(req.params.id);
         if (!data)
             return response.error(res, "Inventaris tidak ditemukan", 404);
+
+        const oldJenisId = data.inv_jenis_id;
+        const isAdmin = req.user?.user_jabatan === "admin";
 
         const fields = [
             "inv_no",
@@ -186,6 +237,7 @@ const update = async (req, res, next) => {
             "inv_is_active",
         ];
         fields.forEach((f) => {
+            if (f === "inv_is_active" && !isAdmin) return; // Hanya admin yang berhak merubah status aktif/nonaktif
             if (req.body[f] !== undefined) {
                 if (f === "inv_pabrik_kode") {
                     data[f] = req.body[f] ? String(req.body[f]).trim().toUpperCase() : null;
@@ -215,6 +267,12 @@ const update = async (req, res, next) => {
 
         await data.save();
 
+        // Sinkronisasi target otomatis jadwal
+        await syncJadwalTargetForJenis(effectiveJenisId);
+        if (oldJenisId && oldJenisId !== effectiveJenisId) {
+            await syncJadwalTargetForJenis(oldJenisId);
+        }
+
         return response.ok(res, data, "Inventaris berhasil diupdate");
     } catch (err) {
         next(err);
@@ -229,6 +287,10 @@ const toggleAktif = async (req, res, next) => {
             return response.error(res, "Inventaris tidak ditemukan", 404);
         data.inv_is_active = data.inv_is_active ? 0 : 1;
         await data.save();
+
+        // Sinkronisasi target otomatis jadwal saat status aktif/nonaktif berubah
+        await syncJadwalTargetForJenis(data.inv_jenis_id);
+
         return response.ok(
             res,
             data,

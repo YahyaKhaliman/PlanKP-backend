@@ -21,8 +21,28 @@ const monitoringDivisiRoutes = require("./routes/monitoringDivisi.route");
 const app = express();
 app.disable("etag"); // memaksa server mengirim data 200 beserta payload data json lengkap
 
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+    : [];
+
 app.use(
-    cors({ origin: "*", methods: ["GET", "POST", "PUT", "PATCH", "DELETE"] }),
+    cors({
+        origin: (origin, callback) => {
+            // Aplikasi Mobile (Android/iOS) dan request server-to-server tidak mengirim header Origin (!origin)
+            if (
+                !origin ||
+                allowedOrigins.length === 0 ||
+                allowedOrigins.includes("*") ||
+                allowedOrigins.includes(origin)
+            ) {
+                callback(null, true);
+            } else {
+                callback(new Error("CORS Policy: Access denied for this origin."));
+            }
+        },
+        methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+        credentials: true,
+    }),
 );
 app.use(logger);
 app.use(express.json({ limit: "10mb" }));

@@ -96,7 +96,7 @@ const serializeChecklist = (item) => {
     return plain;
 };
 
-const serializeRealisasi = (item) => {
+const serializeRealisasi = (item, req) => {
     if (!item) return null;
     const plain =
         typeof item.get === "function"
@@ -112,6 +112,14 @@ const serializeRealisasi = (item) => {
             .sort(
                 (left, right) => (left.hc_ct_id || 0) - (right.hc_ct_id || 0),
             );
+    }
+    if (plain.real_foto && typeof plain.real_foto === "string") {
+        const raw = plain.real_foto.trim();
+        if (raw && !raw.startsWith("http://") && !raw.startsWith("https://")) {
+            const host = req ? `${req.protocol}://${req.get("host")}` : "";
+            const cleanPath = raw.startsWith("/") ? raw : `/public/image/realisasi/${raw}`;
+            plain.real_foto = host ? `${host}${cleanPath}` : cleanPath;
+        }
     }
     return plain;
 };
@@ -243,7 +251,7 @@ const getAll = async (req, res, next) => {
 
         if (!hasPagination) {
             const data = await Realisasi.findAll(queryOptions);
-            return response.okList(res, data.map(serializeRealisasi), {
+            return response.okList(res, data.map((item) => serializeRealisasi(item, req)), {
                 total: data.length,
                 itemCount: data.length,
             });
@@ -259,7 +267,7 @@ const getAll = async (req, res, next) => {
 
         return response.okList(
             res,
-            rows.map(serializeRealisasi),
+            rows.map((item) => serializeRealisasi(item, req)),
             buildMeta({
                 total: count,
                 limit,
@@ -1123,7 +1131,7 @@ const getKendala = async (req, res, next) => {
 
         // 3. Match status tindak lanjut secara cepat di JS Memory
         let data = list.map((item) => {
-            const plainObj = serializeRealisasi(item);
+            const plainObj = serializeRealisasi(item, req);
             const invFollowUps = nextBaikMap[item.real_inv_id] || [];
 
             // Cari tindak lanjut perbaikan pertama yang berkondisi "Baik" setelah tanggal kendala ini

@@ -22,16 +22,14 @@ const compressImageToTargetSize = async (filePath, targetKb = 10) => {
         let origWidth = metadata.width || 1024;
 
         // Tentukan resolusi awal berdasarkan targetKb
-        // Jika target <= 15 KB -> max 480px
-        // Jika target <= 50 KB -> max 800px
         let maxDim = targetKb <= 15 ? 480 : targetKb <= 50 ? 800 : 1024;
         let currentWidth = Math.min(origWidth, maxDim);
 
-        let quality = 75;
+        let quality = 70;
         let bestBuffer = null;
 
         // Loop adaptif hingga ukuran benar-benar <= targetBytes
-        for (let attempt = 0; attempt < 15; attempt++) {
+        for (let attempt = 0; attempt < 25; attempt++) {
             const buf = await sharp(filePath)
                 .rotate() // Auto orientasi dari EXIF + hapus metadata junk
                 .resize(currentWidth, null, {
@@ -51,12 +49,14 @@ const compressImageToTargetSize = async (filePath, targetKb = 10) => {
                 break;
             }
 
-            // Kurangi kualitas lalu kecilkan resolusi jika masih melampaui target
-            if (quality > 30) {
-                quality -= 15;
-            } else if (currentWidth > 200) {
-                currentWidth = Math.round(currentWidth * 0.75);
-                quality = 60;
+            // Penurunan adaptif yang lebih tegas & bertahap tanpa reset kualitas yang berlebihan
+            if (quality > 25) {
+                quality -= 10;
+            } else if (currentWidth > 120) {
+                currentWidth = Math.round(currentWidth * 0.8);
+                quality = 40; // Set kualitas moderat saat resolusi diturunkan
+            } else if (quality > 10) {
+                quality -= 5;
             } else {
                 break;
             }

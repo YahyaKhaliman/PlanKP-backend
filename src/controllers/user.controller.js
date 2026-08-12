@@ -24,6 +24,13 @@ const getAll = async (req, res, next) => {
                 }
                 where.user_jabatan = jabatan;
             }
+
+            // Admin tidak bisa melihat user dengan jabatan manager
+            if (isAdmin) {
+                if (!where.user_jabatan || where.user_jabatan === "manager") {
+                    where.user_jabatan = { [Op.ne]: "manager" };
+                }
+            }
         } else {
             where.user_jabatan = "user";
         }

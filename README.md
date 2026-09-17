@@ -9,7 +9,7 @@ PlanKP Backend API adalah REST API berbasis **Node.js** dan **Express.js** yang 
 - **Autentikasi JWT**: Manajemen token login aman, pengecekan data sesi (`/me`), dan perubahan kata sandi.
 - **Role & Scope Authorization**: Proteksi route untuk membatasi aksi berdasarkan divisi (GA, IT, Driver) dan jabatan (Admin, User/Teknisi).
 - **Sequelize ORM Integration**: Model terstruktur untuk manipulasi data MySQL secara aman dengan proteksi SQL Injection otomatis.
-- **Cross-Database Queries**: Mendukung query ke database pembantu (`DB_HELPER` untuk data pabrik/cabang) dan database HRD (`DB_HRD` untuk membaca hari libur nasional).
+- **Cross-Database Queries**: Mendukung query ke database pembantu (`DB_HELPER` untuk data pabrik/cabang) dan database HRD (`DB_HELPER2` untuk membaca hari libur perusahaan).
 - **Upload File Berkas**: Middleware **Multer** terintegrasi untuk menangani penyimpanan bukti foto realisasi maintenance.
 
 ---

@@ -1619,6 +1619,222 @@ const exportExcel = async (req, res, next) => {
     }
 };
 
+const getHistorySummary = async (req, res, next) => {
+    try {
+        const today = new Date();
+        const queryBulan = req.query.bulan
+            ? parseInt(req.query.bulan)
+            : today.getMonth() + 1;
+        const queryTahun = req.query.tahun
+            ? parseInt(req.query.tahun)
+            : today.getFullYear();
+
+        const queryUserId = req.query.user_id ? parseInt(req.query.user_id) : null;
+        let queryDivisi = req.query.divisi ? normalizeDivisi(req.query.divisi) : null;
+
+        // Role-based scope restrictions
+        const isAdmin = isAdminUser(req);
+        const isManager = isManagerUser(req);
+        const isSelfOnly = isSelfOnlyRealisasiRole(req);
+
+        let targetUserId = queryUserId;
+        if (isSelfOnly) {
+            targetUserId = req.user.user_id;
+            queryDivisi = normalizeDivisi(req.user.user_divisi);
+        } else if (isAdmin) {
+            queryDivisi = normalizeDivisi(req.user.user_divisi);
+        }
+
+        const startOfMonth = new Date(queryTahun, queryBulan - 1, 1);
+        startOfMonth.setHours(0, 0, 0, 0);
+        const endOfMonth = new Date(queryTahun, queryBulan, 0);
+        endOfMonth.setHours(23, 59, 59, 999);
+
+        const startOfMonthStr = `${queryTahun}-${String(queryBulan).padStart(2, "0")}-01`;
+        const endOfMonthStr = `${queryTahun}-${String(queryBulan).padStart(2, "0")}-${String(endOfMonth.getDate()).padStart(2, "0")}`;
+
+        const holidays = await getHolidaysForMonth(queryTahun, queryBulan, queryDivisi);
+
+        const jadwalWhere = {
+            jdw_status: "Draft",
+            jdw_tgl_mulai: { [Op.lte]: endOfMonthStr },
+            [Op.or]: [
+                { jdw_tgl_selesai: null },
+                { jdw_tgl_selesai: { [Op.gte]: startOfMonthStr } },
+            ],
+        };
+
+        if (queryDivisi) {
+            jadwalWhere.jdw_divisi = queryDivisi;
+        }
+
+        const activeJadwalList = await Jadwal.findAll({
+            where: jadwalWhere,
+            attributes: [
+                "jdw_id",
+                "jdw_judul",
+                "jdw_divisi",
+                "jdw_jenis_id",
+                "jdw_frekuensi",
+                "jdw_target",
+                "jdw_gap_hari",
+                "jdw_tgl_mulai",
+                "jdw_tgl_selesai",
+                "jdw_pabrik_kode",
+                "jdw_status",
+                [
+                    sequelize.literal(`(
+                        SELECT COUNT(*)
+                        FROM plan_inventaris i
+                        WHERE i.inv_jenis_id = plan_jadwal.jdw_jenis_id
+                          AND i.inv_is_active = 1
+                          AND (
+                            plan_jadwal.jdw_pabrik_kode IS NULL
+                            OR TRIM(plan_jadwal.jdw_pabrik_kode) = ''
+                            OR FIND_IN_SET(i.inv_pabrik_kode, plan_jadwal.jdw_pabrik_kode) > 0
+                          )
+                    )`),
+                    "jdw_total_unit",
+                ],
+            ],
+            order: [["jdw_judul", "ASC"]],
+        });
+
+        // Realisasi Selesai di bulan & tahun ini
+        const realisasiWhere = {
+            real_status: "Selesai",
+            real_bulan: queryBulan,
+            real_tahun: queryTahun,
+        };
+
+        if (targetUserId) {
+            realisasiWhere.real_teknisi_id = targetUserId;
+        }
+
+        const realisasiInclude = [];
+        if (queryDivisi) {
+            realisasiInclude.push({
+                model: Jadwal,
+                as: "real_jadwal",
+                attributes: ["jdw_id", "jdw_judul", "jdw_frekuensi", "jdw_divisi"],
+                where: { jdw_divisi: queryDivisi },
+            });
+        } else {
+            realisasiInclude.push({
+                model: Jadwal,
+                as: "real_jadwal",
+                attributes: ["jdw_id", "jdw_judul", "jdw_frekuensi", "jdw_divisi"],
+            });
+        }
+
+        const realisasiList = await Realisasi.findAll({
+            where: realisasiWhere,
+            include: realisasiInclude,
+        });
+
+        // Hitung realisasi count per jdw_id dan deteksi cross_month_weeks
+        const realisasiCountByJdwId = {};
+        const crossMonthWeeks = new Set();
+
+        for (const r of realisasiList) {
+            const jdwId = r.real_jadwal_id;
+            realisasiCountByJdwId[jdwId] = (realisasiCountByJdwId[jdwId] || 0) + 1;
+
+            if (r.real_jadwal?.jdw_frekuensi === "Mingguan" && r.real_tgl) {
+                const rDate = new Date(r.real_tgl);
+                if (rDate.getMonth() + 1 !== queryBulan) {
+                    crossMonthWeeks.add(r.real_week_number);
+                }
+            }
+        }
+
+        // Map target & realisasi per jadwal
+        const frequencyGroups = {
+            Harian: [],
+            Mingguan: [],
+            Bulanan: [],
+        };
+
+        let totalTarget = 0;
+        let totalRealisasi = 0;
+
+        for (const j of activeJadwalList) {
+            const plain = j.get({ plain: true });
+            const freq = plain.jdw_frekuensi || "Harian";
+
+            const appearances = getEffectiveScheduleDatesInMonth(
+                plain,
+                startOfMonth,
+                endOfMonth,
+                holidays,
+            ).length;
+
+            const targetVal = Number(plain.jdw_target || 0);
+            const liveTotalUnit = Number(plain.jdw_total_unit || 0);
+            const perTarget = targetVal > 0 ? targetVal : liveTotalUnit;
+
+            const targetBulan = appearances * perTarget;
+            const realBulan = realisasiCountByJdwId[plain.jdw_id] || 0;
+            const pct = targetBulan > 0
+                ? Math.min(100, Math.round((realBulan / targetBulan) * 100))
+                : (realBulan > 0 ? 100 : 0);
+
+            totalTarget += targetBulan;
+            totalRealisasi += realBulan;
+
+            const row = {
+                jdw_id: plain.jdw_id,
+                nama_tugas: plain.jdw_judul || `Jadwal #${plain.jdw_id}`,
+                total_target_per_period: perTarget,
+                target: targetBulan,
+                realisasi: realBulan,
+                percent: pct,
+            };
+
+            if (frequencyGroups[freq]) {
+                frequencyGroups[freq].push(row);
+            } else {
+                frequencyGroups.Harian.push(row);
+            }
+        }
+
+        const totalPercent = totalTarget > 0
+            ? Math.min(100, Math.round((totalRealisasi / totalTarget) * 1000) / 10)
+            : 0;
+
+        let scoreLabel = "Buruk";
+        if (totalPercent >= 90) {
+            scoreLabel = "Sempurna";
+        } else if (totalPercent >= 80) {
+            scoreLabel = "Baik";
+        } else if (totalPercent >= 70) {
+            scoreLabel = "Cukup";
+        }
+
+        const groups = Object.keys(frequencyGroups).map((freq) => ({
+            frequency: freq,
+            details: frequencyGroups[freq].sort((a, b) =>
+                a.nama_tugas.localeCompare(b.nama_tugas),
+            ),
+        }));
+
+        return response.ok(res, {
+            bulan: queryBulan,
+            tahun: queryTahun,
+            user_id: targetUserId,
+            divisi: queryDivisi,
+            total_target: totalTarget,
+            total_realisasi: totalRealisasi,
+            total_nilai_percent: totalPercent,
+            score_label: scoreLabel,
+            cross_month_weeks: Array.from(crossMonthWeeks).sort((a, b) => a - b),
+            groups,
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
 module.exports = {
     getAll,
     getOne,
@@ -1631,4 +1847,5 @@ module.exports = {
     getTemplate,
     uploadFoto,
     exportExcel,
+    getHistorySummary,
 };

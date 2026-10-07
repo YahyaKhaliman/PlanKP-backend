@@ -7,21 +7,10 @@ const {
     register,
 } = require("../controllers/auth.controller");
 const { verifyToken } = require("../middleware/auth");
-const validate = require("../middleware/validate");
-const {
-    loginSchema,
-    registerSchema,
-    changePasswordSchema,
-} = require("../validators/auth.validator");
 
-router.post("/login", validate(loginSchema), login);
-router.post("/register", validate(registerSchema), register);
+router.post("/login", login);
+router.post("/register", register);
 router.get("/me", verifyToken, me);
-router.put(
-    "/change-password",
-    verifyToken,
-    validate(changePasswordSchema),
-    changePassword,
-);
+router.put("/change-password", verifyToken, changePassword);
 
 module.exports = router;

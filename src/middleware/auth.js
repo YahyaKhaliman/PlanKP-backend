@@ -1,6 +1,6 @@
 const jwt = require("jsonwebtoken");
 const response = require("../utils/response");
-const UserService = require("../services/user.service");
+const { plan_user } = require("../models");
 const { normalizeDivisi } = require("../utils/divisi");
 
 const verifyToken = async (req, res, next) => {
@@ -18,7 +18,10 @@ const verifyToken = async (req, res, next) => {
         }
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await UserService.findActiveById(decoded.id);
+        const user = await plan_user.findOne({
+            where: { user_id: decoded.id, user_is_active: 1 },
+            attributes: { exclude: ["user_password"] },
+        });
         if (!user)
             return response.error(
                 res,

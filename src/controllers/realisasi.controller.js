@@ -15,11 +15,7 @@ const { Op, QueryTypes } = require("sequelize");
 const response = require("../utils/response");
 const { normalizeDivisi } = require("../utils/divisi");
 const { parsePagination, buildMeta } = require("../utils/pagination");
-const {
-    getWeekNumber: getWeekNumberUtil,
-    getMonthNumber,
-    getYear,
-} = require("../utils/date-helper");
+const { getWeekNumber: getWeekNumberUtil } = require("../utils/date-helper");
 const { compressImageToTargetSize } = require("../utils/imageCompressor");
 const {
     getEffectiveScheduleDatesInMonth,
@@ -446,8 +442,8 @@ const validateRealisasiEligibility = async (
     if (Number.isNaN(tgl.getTime())) {
         return { error: "Format tanggal realisasi tidak valid", status: 400 };
     }
-    const bulan = getMonthNumber(tgl);
-    const tahun = getYear(tgl);
+    const bulan = tgl.getMonth() + 1;
+    const tahun = tgl.getFullYear();
     const weekNo = getWeekNumberUtil(tgl);
 
     const jadwal = await Jadwal.findByPk(real_jadwal_id, {
@@ -467,9 +463,9 @@ const validateRealisasiEligibility = async (
     });
     if (!jadwal) return { error: "Jadwal tidak ditemukan", status: 404 };
 
-    if (jadwal.jdw_status !== "Draft") {
+    if (jadwal.jdw_status !== "Aktif") {
         return {
-            error: "Jadwal harus berstatus Draft untuk realisasi",
+            error: "Jadwal harus berstatus Aktif untuk dapat direalisasikan",
             status: 400,
         };
     }
@@ -1351,7 +1347,7 @@ const exportExcel = async (req, res, next) => {
             const holidays = await getHolidaysForMonth(yNum, mNum);
 
             const jadwalWhere = {
-                jdw_status: { [Op.in]: ["Draft", "Aktif"] },
+                jdw_status: { [Op.in]: ["Aktif", "Selesai"] },
             };
             if (targetDivisi) {
                 jadwalWhere.jdw_divisi = targetDivisi;
@@ -1656,7 +1652,7 @@ const getHistorySummary = async (req, res, next) => {
         const holidays = await getHolidaysForMonth(queryTahun, queryBulan, queryDivisi);
 
         const jadwalWhere = {
-            jdw_status: "Draft",
+            jdw_status: { [Op.in]: ["Aktif", "Selesai"] },
             jdw_tgl_mulai: { [Op.lte]: endOfMonthStr },
             [Op.or]: [
                 { jdw_tgl_selesai: null },
@@ -1800,7 +1796,7 @@ const getHistorySummary = async (req, res, next) => {
 
         const totalPercent = totalTarget > 0
             ? Math.min(100, Math.round((totalRealisasi / totalTarget) * 1000) / 10)
-            : 0;
+            : (totalRealisasi > 0 ? 100 : 0);
 
         let scoreLabel = "Buruk";
         if (totalPercent >= 90) {

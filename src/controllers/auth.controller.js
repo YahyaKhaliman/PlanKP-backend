@@ -1,7 +1,31 @@
 const jwt = require("jsonwebtoken");
 const { plan_user, log_plankp } = require("../models");
 const response = require("../utils/response");
-const AuthService = require("../services/auth.service");
+const { normalizeDivisi } = require("../utils/divisi");
+
+const generateToken = (user) => {
+    return jwt.sign(
+        {
+            id: user.user_id,
+            jabatan: user.user_jabatan,
+            divisi: user.user_divisi,
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: process.env.JWT_EXPIRES_IN || "8h" },
+    );
+};
+
+const writeLog = (user_nama, status, keterangan, versi) => {
+    if (!user_nama) return Promise.resolve();
+    return log_plankp
+        .create({
+            user_nama,
+            log_status: status,
+            log_keterangan: keterangan,
+            log_versi: versi || null,
+        })
+        .catch(() => {});
+};
 
 const register = async (req, res, next) => {
     try {
@@ -13,22 +37,43 @@ const register = async (req, res, next) => {
             user_cabang,
             user_jabatan,
         } = req.body ?? {};
-        if (!user_nama || !user_password || !user_divisi) {
+        if (!user_nama || !user_password || !user_divisi || !user_nik || !user_cabang) {
             return response.error(
                 res,
-                "Nama, divisi, dan password wajib diisi",
+                "Nama, password, divisi, NIK, dan cabang wajib diisi",
                 400,
             );
         }
-        const user = await AuthService.register({
+        if (user_password.length < 3) {
+            return response.error(res, "Password minimal 3 karakter", 400);
+        }
+
+        const normalizedDivisi = normalizeDivisi(user_divisi);
+        if (!normalizedDivisi) {
+            return response.error(res, "Divisi tidak valid", 400);
+        }
+
+        const existed = await plan_user.findOne({ where: { user_nama, user_is_active: 1 } });
+        if (existed) {
+            return response.error(res, "Username sudah digunakan", 400);
+        }
+
+        const hashedPassword = await plan_user.hashPassword(user_password);
+        const created = await plan_user.create({
             user_nama,
-            user_password,
-            user_divisi,
-            user_nik,
+            user_nik: (user_nik || user_nama).trim(),
+            user_password: hashedPassword,
+            user_divisi: normalizedDivisi,
+            user_jabatan: user_jabatan || "user",
             user_cabang,
-            user_jabatan,
+            user_is_active: 1,
         });
-        return response.ok(res, user, "Registrasi berhasil");
+
+        const plain = created.toJSON();
+        delete plain.user_password;
+        const token = generateToken(plain);
+
+        return response.ok(res, { token, user: plain }, "Registrasi berhasil");
     } catch (err) {
         next(err);
     }
@@ -38,14 +83,7 @@ const login = async (req, res, next) => {
     try {
         const { user_nama, user_password, app_version } = req.body ?? {};
         if (!user_nama || !user_password) {
-            if (user_nama) {
-                await log_plankp.create({
-                    user_nama: user_nama,
-                    log_status: "GAGAL",
-                    log_keterangan: "Password tidak diisi",
-                    log_versi: app_version || null,
-                });
-            }
+            await writeLog(user_nama, "GAGAL", "Password tidak diisi", app_version);
             return response.error(
                 res,
                 "Nama pengguna dan password wajib diisi",
@@ -53,28 +91,21 @@ const login = async (req, res, next) => {
             );
         }
 
-        const result = await AuthService.authenticate({
-            user_nama,
-            user_password,
+        const user = await plan_user.scope("withPassword").findOne({
+            where: { user_nama, user_is_active: 1 },
         });
-        
-        if (!result.ok) {
-            await log_plankp.create({
-                user_nama: user_nama,
-                log_status: "GAGAL",
-                log_keterangan: result.message,
-                log_versi: app_version || null,
-            });
-            return response.error(res, result.message, result.status);
+
+        if (!user || user.user_password !== user_password) {
+            await writeLog(user_nama, "GAGAL", "Nama pengguna atau password salah", app_version);
+            return response.error(res, "Nama pengguna atau password salah", 401);
         }
 
-        await log_plankp.create({
-            user_nama: user_nama,
-            log_status: "BERHASIL",
-            log_keterangan: "Login berhasil",
-            log_versi: app_version || null,
-        });
-        return response.ok(res, result.data, "Login berhasil");
+        const plain = user.toJSON();
+        delete plain.user_password;
+        const token = generateToken(plain);
+
+        await writeLog(user_nama, "BERHASIL", "Login berhasil", app_version);
+        return response.ok(res, { token, user: plain }, "Login berhasil");
     } catch (err) {
         next(err);
     }
@@ -89,7 +120,7 @@ const me = async (req, res) => {
 
 const changePassword = async (req, res, next) => {
     try {
-        const { password_lama, password_baru } = req.body;
+        const { password_lama, password_baru } = req.body ?? {};
         if (!password_lama || !password_baru) {
             return response.error(
                 res,
@@ -97,8 +128,8 @@ const changePassword = async (req, res, next) => {
                 400,
             );
         }
-        if (password_baru.length < 2) {
-            return response.error(res, "Password baru minimal 2 karakter", 400);
+        if (password_baru.length < 6) {
+            return response.error(res, "Password baru minimal 6 karakter", 400);
         }
 
         const user = await plan_user

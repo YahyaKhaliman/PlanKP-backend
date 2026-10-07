@@ -17,9 +17,10 @@ const jenisRoutes = require("./routes/jenis.route");
 const systemRoutes = require("./routes/system.route");
 const systemController = require("./controllers/system.controller");
 const monitoringDivisiRoutes = require("./routes/monitoringDivisi.route");
+const voucherRoutes = require("./routes/voucher.route");
 
 const app = express();
-app.disable("etag"); // memaksa server mengirim data 200 beserta payload data json lengkap
+app.disable("etag"); // Memaksa server mengirim data 200 beserta payload data json lengkap
 
 app.use(
     cors({
@@ -48,6 +49,7 @@ app.use("/api/master", jadwalRoutes);
 app.use("/api/master", jenisRoutes);
 app.use("/api/master", systemRoutes);
 app.use("/api/master", monitoringDivisiRoutes);
+app.use("/api/master", voucherRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

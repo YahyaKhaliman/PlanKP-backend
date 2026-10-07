@@ -11,10 +11,15 @@ const response = require("../utils/response");
 const syncJadwalTargetForJenis = async (jenisId) => {
     if (!jenisId) return;
     try {
+        const todayStr = new Date().toISOString().split("T")[0];
         const jadwals = await Jadwal.findAll({
             where: {
                 jdw_jenis_id: jenisId,
-                jdw_status: "Draft",
+                jdw_status: "Aktif",
+                [Op.or]: [
+                    { jdw_tgl_selesai: null },
+                    { jdw_tgl_selesai: { [Op.gte]: todayStr } },
+                ],
             },
         });
 

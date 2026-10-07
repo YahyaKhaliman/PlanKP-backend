@@ -248,7 +248,7 @@ const buildCurrentPeriodDoneCountLiteral = () => `(
 
 const JENIS_KATEGORI = DIVISI_CANONICAL;
 const JADWAL_FREKUENSI = ["Harian", "Mingguan", "Bulanan"];
-const JADWAL_STATUS = ["Draft", "Selesai"];
+const JADWAL_STATUS = ["Draft", "Aktif", "Selesai", "Dibatalkan"];
 const REALISASI_STATUS = ["Draft", "Selesai"];
 const KONDISI_LIST = ["Baik", "Perlu Perhatian", "Rusak"];
 
@@ -419,7 +419,7 @@ const getDashboardSummary = async (req, res, next) => {
             FROM plan_inventaris i
             JOIN plan_jadwal j ON j.jdw_jenis_id = i.inv_jenis_id
             WHERE i.inv_is_active = 1
-              AND j.jdw_status = 'Draft'
+              AND j.jdw_status = 'Aktif'
               AND (
                 j.jdw_pabrik_kode IS NULL 
                 OR TRIM(j.jdw_pabrik_kode) = '' 
@@ -441,7 +441,7 @@ const getDashboardSummary = async (req, res, next) => {
         const todayDate = new Date();
         todayDate.setHours(0, 0, 0, 0);
 
-        const activeJadwalWhere = { jdw_status: "Draft" };
+        const activeJadwalWhere = { jdw_status: "Aktif" };
         if (isSelfOnly) {
             activeJadwalWhere.jdw_assigned_to = userId;
         } else if (isAdmin && userDivisi) {
@@ -541,9 +541,62 @@ const getDashboardSummary = async (req, res, next) => {
         startOfMonth.setHours(0, 0, 0, 0);
         const endOfMonth = new Date(currentYear, currentMonth, 0);
         endOfMonth.setHours(23, 59, 59, 999);
+        const startOfMonthStr = `${currentYear}-${String(currentMonth).padStart(2, "0")}-01`;
+        const endOfMonthStr = `${currentYear}-${String(currentMonth).padStart(2, "0")}-${String(endOfMonth.getDate()).padStart(2, "0")}`;
+
+        // Ambil jadwal yang aktif pada bulan ini untuk perhitungan target bulan berjalan
+        const monthlyTargetJadwalWhere = {
+            jdw_status: { [Op.in]: ["Aktif", "Selesai"] },
+            jdw_tgl_mulai: { [Op.lte]: endOfMonthStr },
+            [Op.or]: [
+                { jdw_tgl_selesai: null },
+                { jdw_tgl_selesai: { [Op.gte]: startOfMonthStr } },
+            ],
+        };
+        if (isSelfOnly) {
+            monthlyTargetJadwalWhere.jdw_assigned_to = userId;
+        } else if (isAdmin && userDivisi) {
+            // Op.and agar filter rentang tanggal (Op.or di level atas) tidak tertimpa
+            monthlyTargetJadwalWhere[Op.and] = [
+                {
+                    [Op.or]: [
+                        { jdw_divisi: userDivisi },
+                        { jdw_assigned_to: userId },
+                    ],
+                },
+            ];
+        }
+
+        const monthlyTargetJadwalList = await Jadwal.findAll({
+            where: monthlyTargetJadwalWhere,
+            attributes: [
+                "jdw_id",
+                "jdw_judul",
+                "jdw_frekuensi",
+                "jdw_divisi",
+                "jdw_target",
+                "jdw_gap_hari",
+                "jdw_tgl_mulai",
+                "jdw_tgl_selesai",
+                [
+                    sequelize.literal(`(
+                        SELECT COUNT(*)
+                        FROM plan_inventaris i
+                        WHERE i.inv_jenis_id = plan_jadwal.jdw_jenis_id
+                          AND i.inv_is_active = 1
+                          AND (
+                            plan_jadwal.jdw_pabrik_kode IS NULL 
+                            OR TRIM(plan_jadwal.jdw_pabrik_kode) = '' 
+                            OR FIND_IN_SET(i.inv_pabrik_kode, plan_jadwal.jdw_pabrik_kode) > 0
+                          )
+                    )`),
+                    "jdw_total_unit",
+                ],
+            ],
+        });
 
         let totalTargetBulanIni = 0;
-        for (const j of activeJadwalList) {
+        for (const j of monthlyTargetJadwalList) {
             const plain = j.get({ plain: true });
             const dates = getEffectiveScheduleDatesInMonth(
                 plain,
@@ -599,11 +652,71 @@ const getDashboardSummary = async (req, res, next) => {
         const monthNamesAbbr = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
         const monthlyComparison = [];
 
+        // Ambil jadwal yang aktif dalam rentang 5 bulan terakhir
+        const oldestD = new Date(currentYear, currentMonth - 1 - 4, 1);
+        const oldestMonthStartStr = `${oldestD.getFullYear()}-${String(oldestD.getMonth() + 1).padStart(2, "0")}-01`;
+
+        const fiveMonthsJadwalWhere = {
+            jdw_status: { [Op.in]: ["Aktif", "Selesai"] },
+            jdw_tgl_mulai: { [Op.lte]: endOfMonthStr },
+            [Op.or]: [
+                { jdw_tgl_selesai: null },
+                { jdw_tgl_selesai: { [Op.gte]: oldestMonthStartStr } },
+            ],
+        };
+        if (isSelfOnly) {
+            fiveMonthsJadwalWhere.jdw_assigned_to = userId;
+        } else if (isAdmin && userDivisi) {
+            // Op.and agar filter rentang tanggal (Op.or di level atas) tidak tertimpa
+            fiveMonthsJadwalWhere[Op.and] = [
+                {
+                    [Op.or]: [
+                        { jdw_divisi: userDivisi },
+                        { jdw_assigned_to: userId },
+                    ],
+                },
+            ];
+        }
+
+        const fiveMonthsJadwalList = await Jadwal.findAll({
+            where: fiveMonthsJadwalWhere,
+            attributes: [
+                "jdw_id",
+                "jdw_judul",
+                "jdw_frekuensi",
+                "jdw_divisi",
+                "jdw_target",
+                "jdw_gap_hari",
+                "jdw_tgl_mulai",
+                "jdw_tgl_selesai",
+                [
+                    sequelize.literal(`(
+                        SELECT COUNT(*)
+                        FROM plan_inventaris i
+                        WHERE i.inv_jenis_id = plan_jadwal.jdw_jenis_id
+                          AND i.inv_is_active = 1
+                          AND (
+                            plan_jadwal.jdw_pabrik_kode IS NULL 
+                            OR TRIM(plan_jadwal.jdw_pabrik_kode) = '' 
+                            OR FIND_IN_SET(i.inv_pabrik_kode, plan_jadwal.jdw_pabrik_kode) > 0
+                          )
+                    )`),
+                    "jdw_total_unit",
+                ],
+            ],
+        });
+
         for (let i = 4; i >= 0; i--) {
             const d = new Date(currentYear, currentMonth - 1 - i, 1);
             const mMonth = d.getMonth() + 1;
             const mYear = d.getFullYear();
             const mName = monthNamesAbbr[d.getMonth()];
+            const mStart = new Date(mYear, mMonth - 1, 1);
+            mStart.setHours(0, 0, 0, 0);
+            const mEnd = new Date(mYear, mMonth, 0);
+            mEnd.setHours(23, 59, 59, 999);
+            const mStartStr = `${mYear}-${String(mMonth).padStart(2, "0")}-01`;
+            const mEndStr = `${mYear}-${String(mMonth).padStart(2, "0")}-${String(mEnd.getDate()).padStart(2, "0")}`;
 
             const mRealWhere = {
                 real_status: "Selesai",
@@ -629,30 +742,32 @@ const getDashboardSummary = async (req, res, next) => {
             });
 
             let mTargetCount = 0;
-            if (i === 0) {
-                mTargetCount = totalTargetBulanIni;
-            } else {
-                const mHolidays = await getHolidaysForMonth(mYear, mMonth);
-                const mStart = new Date(mYear, mMonth - 1, 1);
-                mStart.setHours(0, 0, 0, 0);
-                const mEnd = new Date(mYear, mMonth, 0);
-                mEnd.setHours(23, 59, 59, 999);
+            const mHolidays = await getHolidaysForMonth(mYear, mMonth);
 
-                for (const j of activeJadwalList) {
-                    const plain = j.get({ plain: true });
-                    const dates = getEffectiveScheduleDatesInMonth(
-                        plain,
-                        mStart,
-                        mEnd,
-                        mHolidays,
-                    );
-                    const count = dates.length;
-                    const perTarget =
-                        Number(plain.jdw_target || 0) > 0
-                            ? Number(plain.jdw_target)
-                            : Number(plain.jdw_total_unit || 0);
-                    mTargetCount += count * perTarget;
-                }
+            // Filter jadwal yang aktif hanya pada rentang bulan mMonth/mYear ini
+            const activeInMonthJadwal = fiveMonthsJadwalList.filter((j) => {
+                const plain = j.get({ plain: true });
+                const jStartStr = plain.jdw_tgl_mulai;
+                const jEndStr = plain.jdw_tgl_selesai;
+                if (jStartStr && jStartStr > mEndStr) return false;
+                if (jEndStr && jEndStr < mStartStr) return false;
+                return true;
+            });
+
+            for (const j of activeInMonthJadwal) {
+                const plain = j.get({ plain: true });
+                const dates = getEffectiveScheduleDatesInMonth(
+                    plain,
+                    mStart,
+                    mEnd,
+                    mHolidays,
+                );
+                const count = dates.length;
+                const perTarget =
+                    Number(plain.jdw_target || 0) > 0
+                        ? Number(plain.jdw_target)
+                        : Number(plain.jdw_total_unit || 0);
+                mTargetCount += count * perTarget;
             }
 
             monthlyComparison.push({
@@ -684,6 +799,7 @@ const getDashboardSummary = async (req, res, next) => {
     }
 };
 module.exports = {
+    fetchPabrikList,
     getPabrik,
     getMetadata,
     getDashboardSummary,

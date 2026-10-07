@@ -1,6 +1,3 @@
-// Pastikan timezone Node.js selaras dengan MySQL timezone (+07:00)
-process.env.TZ = process.env.TZ || "Asia/Jakarta";
-
 const {
     plan_jadwal: Jadwal,
     plan_user: User,
@@ -9,20 +6,17 @@ const {
     plan_realisasi: Realisasi,
     sequelize,
 } = require("../models");
-const UserService = require("../services/user.service");
 const { Op, QueryTypes } = require("sequelize");
 const response = require("../utils/response");
 const { normalizeDivisi } = require("../utils/divisi");
 const { parsePagination, buildMeta } = require("../utils/pagination");
 const {
     getWeekNumber: getWeekNumberUtil,
-    getMonthNumber,
-    getYear,
     calculateJadwalCountdown,
     formatDateOnly,
 } = require("../utils/date-helper");
 
-const { is6DaysDivisi } = require("./system.controller");
+const { is6DaysDivisi, fetchPabrikList } = require("./system.controller");
 
 const resolveJadwalSort = (sortBy, orderBy) => {
     const allowedSort = [
@@ -111,10 +105,11 @@ const findActiveJenis = async (jenisId, adminScope) => {
 
 // helper: hitung week_number, bulan, tahun dari tanggal (pakai utility untuk konsistensi)
 const calculateDateComponents = (dateStr) => {
+    const d = new Date(dateStr);
     return {
-        weekNumber: getWeekNumberUtil(new Date(dateStr)),
-        month: getMonthNumber(new Date(dateStr)),
-        year: getYear(new Date(dateStr)),
+        weekNumber: getWeekNumberUtil(d),
+        month: d.getMonth() + 1,
+        year: d.getFullYear(),
     };
 };
 
@@ -543,19 +538,7 @@ const buildPeriodeWhere = ({
 const validatePabrikCodes = async (codes) => {
     if (!codes.length) return [];
 
-    const dbHelper = process.env.DB_HELPER || "kencanaprint";
-    const rows = await sequelize.query(
-        `
-        SELECT pab_kode
-        FROM ${dbHelper}.tpabrik
-        WHERE pab_kode IN (:codes)
-        `,
-        {
-            replacements: { codes },
-            type: QueryTypes.SELECT,
-        },
-    );
-
+    const rows = await fetchPabrikList();
     const known = new Set(rows.map((row) => row.pab_kode));
     const invalid = codes.filter((code) => !known.has(code));
     if (invalid.length) {
@@ -591,9 +574,11 @@ const getAll = async (req, res, next) => {
             );
         }
         if (status) {
-            where.jdw_status = status;
+            if (status !== "all" && status !== "*") {
+                where.jdw_status = status;
+            }
         } else {
-            where.jdw_status = { [Op.ne]: "Selesai" };
+            where.jdw_status = "Aktif";
         }
         if (jenis) where.jdw_jenis_id = jenis;
         if (assigned_to) where.jdw_assigned_to = assigned_to;
@@ -718,9 +703,11 @@ const getByUser = async (req, res, next) => {
         const order = resolveJadwalSort(req.query.sort, req.query.order);
         const where = { jdw_assigned_to: req.user.user_id };
         if (status) {
-            where.jdw_status = status;
+            if (status !== "all" && status !== "*") {
+                where.jdw_status = status;
+            }
         } else {
-            where.jdw_status = { [Op.ne]: "Selesai" };
+            where.jdw_status = "Aktif";
         }
         if (jenis) where.jdw_jenis_id = jenis;
         if (tgl) {
@@ -809,9 +796,11 @@ const getByDivisi = async (req, res, next) => {
             where.jdw_divisi = userDivisi;
         }
         if (status) {
-            where.jdw_status = status;
+            if (status !== "all" && status !== "*") {
+                where.jdw_status = status;
+            }
         } else {
-            where.jdw_status = { [Op.ne]: "Selesai" };
+            where.jdw_status = "Aktif";
         }
         if (jenis) where.jdw_jenis_id = jenis;
         if (tgl) {
@@ -1229,6 +1218,12 @@ const create = async (req, res, next) => {
             ? parsedPabrikCodes.join(",")
             : null;
 
+        const resolvedAssignedTo =
+            jdw_assigned_to ||
+            req.body.jdw_user_id ||
+            req.body.assigned_to ||
+            null;
+
         const data = await Jadwal.create({
             jdw_judul,
             jdw_jenis_id,
@@ -1241,10 +1236,10 @@ const create = async (req, res, next) => {
             jdw_bulan: bulan,
             jdw_tahun: tahun,
             jdw_target: parsedTarget,
-            jdw_assigned_to: jdw_assigned_to || null,
+            jdw_assigned_to: resolvedAssignedTo,
             jdw_pabrik_kode: pabrikString,
             jdw_notes: jdw_notes || null,
-            jdw_status: "Draft",
+            jdw_status: req.body.jdw_status || "Aktif",
             jdw_dibuat_oleh: req.user.user_id,
         });
 
@@ -1270,6 +1265,94 @@ const update = async (req, res, next) => {
                 403,
             );
         }
+
+        // ── PENGAMAN RIWAYAT REALISASI ───────────────────────────────────────
+        // Jika jadwal sudah memiliki riwayat realisasi, amankan parameter historis
+        const realisasiCount = await Realisasi.count({
+            where: { real_jadwal_id: jadwalId },
+        });
+
+        if (realisasiCount > 0) {
+            if (
+                req.body.jdw_frekuensi !== undefined &&
+                req.body.jdw_frekuensi !== data.jdw_frekuensi
+            ) {
+                return response.error(
+                    res,
+                    "Frekuensi jadwal tidak dapat diubah karena jadwal sudah memiliki riwayat realisasi. Gunakan fitur 'Perbarui Jadwal' (Renew) untuk membuat siklus baru.",
+                    400,
+                );
+            }
+            if (
+                req.body.jdw_jenis_id !== undefined &&
+                Number(req.body.jdw_jenis_id) !== data.jdw_jenis_id
+            ) {
+                return response.error(
+                    res,
+                    "Jenis inventaris tidak dapat diubah karena jadwal sudah memiliki riwayat realisasi.",
+                    400,
+                );
+            }
+            if (req.body.jdw_divisi !== undefined) {
+                const normalizedDivisi =
+                    req.adminScope || normalizeDivisi(req.body.jdw_divisi);
+                if (normalizedDivisi && normalizedDivisi !== data.jdw_divisi) {
+                    return response.error(
+                        res,
+                        "Divisi jadwal tidak dapat diubah karena jadwal sudah memiliki riwayat realisasi.",
+                        400,
+                    );
+                }
+            }
+            if (
+                req.body.jdw_tgl_mulai !== undefined &&
+                req.body.jdw_tgl_mulai !== data.jdw_tgl_mulai
+            ) {
+                const earliestReal = await Realisasi.min("real_tgl", {
+                    where: { real_jadwal_id: jadwalId },
+                });
+                if (
+                    earliestReal &&
+                    new Date(req.body.jdw_tgl_mulai) > new Date(earliestReal)
+                ) {
+                    return response.error(
+                        res,
+                        `Tanggal mulai tidak boleh lebih lambat dari tanggal realisasi pertama (${earliestReal})`,
+                        400,
+                    );
+                }
+            }
+            if (
+                req.body.jdw_target !== undefined &&
+                Number(req.body.jdw_target) !== data.jdw_target
+            ) {
+                const now = new Date();
+                const currentMonth = now.getMonth() + 1;
+                const currentYear = now.getFullYear();
+                const pastRealisasiCount = await Realisasi.count({
+                    where: {
+                        real_jadwal_id: jadwalId,
+                        real_status: "Selesai",
+                        [Op.or]: [
+                            { real_tahun: { [Op.lt]: currentYear } },
+                            {
+                                real_tahun: currentYear,
+                                real_bulan: { [Op.lt]: currentMonth },
+                            },
+                        ],
+                    },
+                });
+                if (pastRealisasiCount > 0) {
+                    return response.error(
+                        res,
+                        "Target jadwal tidak dapat diubah secara langsung karena memiliki riwayat realisasi pada bulan-bulan sebelumnya (dapat mengubah persentase historis). Silakan gunakan fitur 'Perbarui Jadwal' (Renew) agar jadwal lama diselesaikan dan dibuat jadwal baru dengan target baru.",
+                        400,
+                    );
+                }
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         const fields = [
             "jdw_judul",
             "jdw_jenis_id",
@@ -1286,6 +1369,10 @@ const update = async (req, res, next) => {
         fields.forEach((f) => {
             if (req.body[f] !== undefined) data[f] = req.body[f];
         });
+        if (req.body.jdw_assigned_to === undefined) {
+            if (req.body.jdw_user_id !== undefined) data.jdw_assigned_to = req.body.jdw_user_id;
+            else if (req.body.assigned_to !== undefined) data.jdw_assigned_to = req.body.assigned_to;
+        }
         if (req.body.jdw_divisi !== undefined) {
             const normalizedDivisi =
                 req.adminScope || normalizeDivisi(req.body.jdw_divisi);
@@ -1445,11 +1532,11 @@ const update = async (req, res, next) => {
     }
 };
 
-// PATCH /jadwal/:id/status  — body: { status: 'Draft' | 'Selesai' }
+// PATCH /jadwal/:id/status  — body: { status: 'Draft' | 'Aktif' | 'Selesai' | 'Dibatalkan' }
 const updateStatus = async (req, res, next) => {
     try {
         const { status } = req.body;
-        const allowed = ["Draft", "Selesai"];
+        const allowed = ["Draft", "Aktif", "Selesai", "Dibatalkan"];
         if (!allowed.includes(status))
             return response.error(res, "Status tidak valid", 400);
 
@@ -1494,7 +1581,7 @@ const hariIni = async (req, res, next) => {
             frekuensiHariIni.push({ jdw_frekuensi: "Bulanan" });
 
         const where = {
-            jdw_status: "Draft",
+            jdw_status: "Aktif",
             jdw_tgl_mulai: { [Op.lte]: today },
             [Op.or]: [
                 { jdw_tgl_selesai: null },
@@ -1535,6 +1622,202 @@ const hariIni = async (req, res, next) => {
     }
 };
 
+// POST /jadwal/:id/renew — Selesaikan jadwal lama dan buat siklus jadwal baru (Close & Renew)
+const renew = async (req, res, next) => {
+    const t = await sequelize.transaction();
+    try {
+        await ensurePabrikKodeLength();
+        const jadwalId = parsePositiveId(req.params.id);
+        if (!jadwalId) {
+            await t.rollback();
+            return response.error(res, "Id jadwal tidak valid", 400);
+        }
+
+        const oldJadwal = await Jadwal.findByPk(jadwalId, { transaction: t });
+        if (!oldJadwal) {
+            await t.rollback();
+            return response.error(res, "Jadwal tidak ditemukan", 404);
+        }
+
+        if (req.adminScope && oldJadwal.jdw_divisi !== req.adminScope) {
+            await t.rollback();
+            return response.error(res, "Akses jadwal lintas divisi ditolak", 403);
+        }
+
+        const {
+            jdw_tgl_selesai_old,
+            jdw_tgl_mulai_new,
+            jdw_tgl_selesai_new,
+            jdw_target_new,
+            jdw_gap_hari_new,
+            jdw_assigned_to_new,
+            jdw_pabrik_kode_new,
+            jdw_judul_new,
+            jdw_notes_new,
+        } = req.body;
+
+        if (!jdw_tgl_mulai_new || !isValidDateInput(jdw_tgl_mulai_new)) {
+            await t.rollback();
+            return response.error(
+                res,
+                "Tanggal mulai jadwal baru wajib diisi dan harus berupa tanggal valid (YYYY-MM-DD)",
+                400,
+            );
+        }
+
+        // Tentukan tanggal selesai jadwal lama (default: 1 hari sebelum tanggal mulai baru)
+        let resolvedTglSelesaiOld = jdw_tgl_selesai_old;
+        if (!resolvedTglSelesaiOld) {
+            const newStartDate = new Date(jdw_tgl_mulai_new);
+            newStartDate.setDate(newStartDate.getDate() - 1);
+            resolvedTglSelesaiOld = formatDateOnly(newStartDate);
+        }
+
+        if (!isValidDateInput(resolvedTglSelesaiOld)) {
+            await t.rollback();
+            return response.error(
+                res,
+                "Tanggal selesai jadwal lama tidak valid",
+                400,
+            );
+        }
+
+        if (new Date(resolvedTglSelesaiOld) < new Date(oldJadwal.jdw_tgl_mulai)) {
+            await t.rollback();
+            return response.error(
+                res,
+                "Tanggal selesai jadwal lama tidak boleh lebih awal dari tanggal mulainya",
+                400,
+            );
+        }
+
+        if (new Date(jdw_tgl_mulai_new) <= new Date(resolvedTglSelesaiOld)) {
+            await t.rollback();
+            return response.error(
+                res,
+                "Tanggal mulai jadwal baru harus setelah tanggal selesai jadwal lama",
+                400,
+            );
+        }
+
+        // Validasi target baru
+        const parsedNewTarget =
+            jdw_target_new !== undefined
+                ? Number(jdw_target_new)
+                : oldJadwal.jdw_target;
+        if (!Number.isInteger(parsedNewTarget) || parsedNewTarget < 1) {
+            await t.rollback();
+            return response.error(
+                res,
+                "Target jadwal baru wajib berupa angka bulat minimal 1",
+                400,
+            );
+        }
+
+        const totalInventaris = await jenisHasActiveInventaris(
+            oldJadwal.jdw_jenis_id,
+        );
+        if (totalInventaris === 0) {
+            await t.rollback();
+            return response.error(
+                res,
+                "Jenis inventaris belum memiliki unit inventaris aktif",
+                400,
+            );
+        }
+        if (parsedNewTarget > totalInventaris) {
+            await t.rollback();
+            return response.error(
+                res,
+                `Target baru tidak boleh melebihi total inventaris jenis (max: ${totalInventaris})`,
+                400,
+            );
+        }
+
+        // Validasi frekuensi start date
+        const frekuensiStartValidation = validateFrekuensiStartDate(
+            oldJadwal.jdw_frekuensi,
+            jdw_tgl_mulai_new,
+        );
+        if (!frekuensiStartValidation.valid) {
+            await t.rollback();
+            return response.error(res, frekuensiStartValidation.message, 400);
+        }
+
+        let parsedGapHariNew = 0;
+        if (["Mingguan", "Bulanan"].includes(oldJadwal.jdw_frekuensi)) {
+            parsedGapHariNew =
+                jdw_gap_hari_new !== undefined
+                    ? Number(jdw_gap_hari_new)
+                    : oldJadwal.jdw_gap_hari;
+            if (!Number.isInteger(parsedGapHariNew) || parsedGapHariNew < 0) {
+                await t.rollback();
+                return response.error(
+                    res,
+                    "Gap realisasi wajib berupa angka bulat minimal 0 untuk frekuensi Mingguan/Bulanan",
+                    400,
+                );
+            }
+        }
+
+        const resolvedPabrikKode =
+            jdw_pabrik_kode_new !== undefined
+                ? (jdw_pabrik_kode_new ? String(jdw_pabrik_kode_new).trim() : null)
+                : oldJadwal.jdw_pabrik_kode;
+
+        const resolvedAssignedTo =
+            jdw_assigned_to_new !== undefined
+                ? jdw_assigned_to_new
+                : oldJadwal.jdw_assigned_to;
+
+        const dateComp = calculateDateComponents(jdw_tgl_mulai_new);
+
+        // 1. Selesaikan jadwal lama
+        oldJadwal.jdw_tgl_selesai = resolvedTglSelesaiOld;
+        oldJadwal.jdw_status = "Selesai";
+        await oldJadwal.save({ transaction: t });
+
+        // 2. Buat jadwal baru
+        const newJadwal = await Jadwal.create(
+            {
+                jdw_judul: jdw_judul_new || oldJadwal.jdw_judul,
+                jdw_jenis_id: oldJadwal.jdw_jenis_id,
+                jdw_divisi: oldJadwal.jdw_divisi,
+                jdw_frekuensi: oldJadwal.jdw_frekuensi,
+                jdw_gap_hari: parsedGapHariNew,
+                jdw_tgl_mulai: jdw_tgl_mulai_new,
+                jdw_tgl_selesai: jdw_tgl_selesai_new || null,
+                jdw_week_number: dateComp.weekNumber,
+                jdw_bulan: dateComp.month,
+                jdw_tahun: dateComp.year,
+                jdw_target: parsedNewTarget,
+                jdw_assigned_to: resolvedAssignedTo,
+                jdw_pabrik_kode: resolvedPabrikKode,
+                jdw_notes:
+                    jdw_notes_new !== undefined
+                        ? jdw_notes_new
+                        : oldJadwal.jdw_notes,
+                jdw_status: "Aktif",
+                jdw_dibuat_oleh: req.user.user_id,
+            },
+            { transaction: t },
+        );
+
+        await t.commit();
+        return response.ok(
+            res,
+            {
+                old_jadwal: oldJadwal,
+                new_jadwal: newJadwal,
+            },
+            "Jadwal lama berhasil diselesaikan dan jadwal baru berhasil dibuat",
+        );
+    } catch (err) {
+        await t.rollback();
+        next(err);
+    }
+};
+
 module.exports = {
     getAll,
     getByDivisi,
@@ -1544,5 +1827,6 @@ module.exports = {
     create,
     update,
     updateStatus,
+    renew,
     hariIni,
 };

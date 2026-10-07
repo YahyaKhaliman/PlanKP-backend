@@ -48,7 +48,12 @@ const getMonitoringDivisi = async (req, res, next) => {
             const allJadwalList = await Jadwal.findAll({
                 where: {
                     jdw_divisi: divisi,
-                    jdw_status: "Draft",
+                    jdw_status: { [Op.in]: ["Aktif", "Selesai"] },
+                    jdw_tgl_mulai: { [Op.lte]: endOfMonthStr },
+                    [Op.or]: [
+                        { jdw_tgl_selesai: null },
+                        { jdw_tgl_selesai: { [Op.gte]: startOfMonthStr } },
+                    ],
                 },
             });
 
@@ -76,7 +81,7 @@ const getMonitoringDivisi = async (req, res, next) => {
             const monthlyJadwalList = await Jadwal.findAll({
                 where: {
                     jdw_divisi: divisi,
-                    jdw_status: "Draft",
+                    jdw_status: { [Op.in]: ["Aktif", "Selesai"] },
                     jdw_tgl_mulai: { [Op.lte]: endOfMonthStr },
                     [Op.or]: [
                         { jdw_tgl_selesai: null },
@@ -186,7 +191,7 @@ const getMonitoringDivisi = async (req, res, next) => {
                                   100,
                                   Math.round((realisasi / target) * 100),
                               )
-                            : 0;
+                            : (realisasi > 0 ? 100 : 0);
 
                     // Hitung countdown period untuk mengecek periodFulfilled
                     const countdown = calculateJadwalCountdown({

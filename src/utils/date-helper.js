@@ -9,14 +9,6 @@ const getWeekNumber = (date) => {
     return weekNumber;
 };
 
-const getMonthNumber = (date) => {
-    return date.getMonth() + 1; // JavaScript bulan 0-11, convert jadi 1-12
-};
-
-const getYear = (date) => {
-    return date.getFullYear();
-};
-
 const normalizeDateOnly = (value) => {
     const date = value instanceof Date ? new Date(value) : new Date(value);
     if (Number.isNaN(date.getTime())) return null;
@@ -174,8 +166,6 @@ const calculateJadwalCountdown = ({
 
 module.exports = {
     getWeekNumber,
-    getMonthNumber,
-    getYear,
     normalizeDateOnly,
     formatDateOnly,
     addByFrequency,

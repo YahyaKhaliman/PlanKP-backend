@@ -96,6 +96,7 @@ const calculateJadwalCountdown = ({
     target,
     selesaiUnit,
     today,
+    gapHari = 0,
 }) => {
     const todayDate = normalizeDateOnly(today || new Date());
     const normalizedStartDate = normalizeDateOnly(startDate);
@@ -136,6 +137,51 @@ const calculateJadwalCountdown = ({
             daysRemaining: Math.floor(
                 (normalizedStartDate - todayDate) / 86400000,
             ),
+        };
+    }
+
+    const effectiveGap = Number(gapHari) || 0;
+
+    // Logika siklus jika Bulanan dan memiliki gap >= 30 hari
+    if (frekuensi === "Bulanan" && effectiveGap >= 30) {
+        const intervalMonths = Math.max(1, Math.round(effectiveGap / 30));
+        const diffMonths =
+            (todayDate.getFullYear() - normalizedStartDate.getFullYear()) * 12 +
+            (todayDate.getMonth() - normalizedStartDate.getMonth());
+
+        const cycleIndex = Math.max(0, Math.floor(diffMonths / intervalMonths));
+        const currentCycleStart = addMonthsPreserveDay(
+            normalizedStartDate,
+            cycleIndex * intervalMonths,
+        );
+        const nextCycleStart = addMonthsPreserveDay(
+            normalizedStartDate,
+            (cycleIndex + 1) * intervalMonths,
+        );
+
+        let dueDate;
+        let isFulfilled = periodFulfilled;
+
+        if (periodFulfilled) {
+            dueDate = nextCycleStart;
+            isFulfilled = true;
+        } else {
+            dueDate = todayDate;
+        }
+
+        let daysRemaining = dueDate
+            ? Math.floor((dueDate - todayDate) / 86400000)
+            : null;
+
+        if (!isFulfilled && daysRemaining != null && daysRemaining < 0) {
+            daysRemaining = 0;
+        }
+
+        return {
+            periodFulfilled: isFulfilled,
+            currentPeriodStart: formatDateOnly(currentCycleStart),
+            nextDueDate: formatDateOnly(dueDate),
+            daysRemaining,
         };
     }
 

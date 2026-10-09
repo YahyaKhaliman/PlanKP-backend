@@ -240,8 +240,49 @@ const buildCurrentPeriodDoneCountLiteral = () => `(
         )
         OR (
             plan_jadwal.jdw_frekuensi = 'Bulanan'
-            AND r.real_tahun = YEAR(CURDATE())
-            AND r.real_bulan = MONTH(CURDATE())
+            AND (
+                CASE
+                    WHEN GREATEST(
+                        COALESCE(plan_jadwal.jdw_gap_hari, 0),
+                        COALESCE((SELECT j.jenis_gap_hari FROM plan_jenis j WHERE j.jenis_id = plan_jadwal.jdw_jenis_id), 0)
+                    ) >= 30 THEN (
+                        r.real_tgl >= DATE_ADD(
+                            plan_jadwal.jdw_tgl_mulai,
+                            INTERVAL (
+                                FLOOR(
+                                    GREATEST(0, PERIOD_DIFF(EXTRACT(YEAR_MONTH FROM CURDATE()), EXTRACT(YEAR_MONTH FROM plan_jadwal.jdw_tgl_mulai)))
+                                    / GREATEST(1, ROUND(GREATEST(
+                                        COALESCE(plan_jadwal.jdw_gap_hari, 0),
+                                        COALESCE((SELECT j.jenis_gap_hari FROM plan_jenis j WHERE j.jenis_id = plan_jadwal.jdw_jenis_id), 0)
+                                    ) / 30))
+                                ) * GREATEST(1, ROUND(GREATEST(
+                                        COALESCE(plan_jadwal.jdw_gap_hari, 0),
+                                        COALESCE((SELECT j.jenis_gap_hari FROM plan_jenis j WHERE j.jenis_id = plan_jadwal.jdw_jenis_id), 0)
+                                    ) / 30))
+                            ) MONTH
+                        )
+                        AND r.real_tgl < DATE_ADD(
+                            plan_jadwal.jdw_tgl_mulai,
+                            INTERVAL (
+                                (FLOOR(
+                                    GREATEST(0, PERIOD_DIFF(EXTRACT(YEAR_MONTH FROM CURDATE()), EXTRACT(YEAR_MONTH FROM plan_jadwal.jdw_tgl_mulai)))
+                                    / GREATEST(1, ROUND(GREATEST(
+                                        COALESCE(plan_jadwal.jdw_gap_hari, 0),
+                                        COALESCE((SELECT j.jenis_gap_hari FROM plan_jenis j WHERE j.jenis_id = plan_jadwal.jdw_jenis_id), 0)
+                                    ) / 30))
+                                ) + 1) * GREATEST(1, ROUND(GREATEST(
+                                        COALESCE(plan_jadwal.jdw_gap_hari, 0),
+                                        COALESCE((SELECT j.jenis_gap_hari FROM plan_jenis j WHERE j.jenis_id = plan_jadwal.jdw_jenis_id), 0)
+                                    ) / 30))
+                            ) MONTH
+                        )
+                    )
+                    ELSE (
+                        r.real_tahun = YEAR(CURDATE())
+                        AND r.real_bulan = MONTH(CURDATE())
+                    )
+                END
+            )
         )
       )
 )`;
@@ -498,6 +539,10 @@ const getDashboardSummary = async (req, res, next) => {
                 frekuensi: plain.jdw_frekuensi,
                 target: plain.jdw_target,
                 selesaiUnit: plain.jdw_selesai_unit,
+                gapHari: Math.max(
+                    Number(plain.jdw_gap_hari || 0),
+                    Number(plain.jenis_gap_hari || 0),
+                ),
             });
 
             let diff = 0;

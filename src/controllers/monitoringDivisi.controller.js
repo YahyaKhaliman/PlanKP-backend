@@ -199,6 +199,7 @@ const getMonitoringDivisi = async (req, res, next) => {
                         frekuensi: plain.jdw_frekuensi,
                         target: plain.jdw_target,
                         selesaiUnit: plain.jdw_selesai_unit,
+                        gapHari: Number(plain.jdw_gap_hari || 0),
                     });
 
                     return {

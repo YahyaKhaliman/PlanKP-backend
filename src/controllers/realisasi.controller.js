@@ -29,8 +29,7 @@ const isManagerUser = (req) =>
     String(req.user?.user_jabatan || "").toLowerCase() === "manager";
 
 const isSelfOnlyRealisasiRole = (req) => {
-    const role = String(req.user?.user_jabatan || "").toLowerCase();
-    return ["user", "teknisi", "it_support"].includes(role);
+    return !isAdminUser(req) && !isManagerUser(req);
 };
 
 const splitPabrikCodes = (value) => {
@@ -163,7 +162,7 @@ const getAll = async (req, res, next) => {
         const userDivisi =
             normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
 
-        if (isSelfOnly && !jadwal_id) {
+        if (isSelfOnly) {
             where.real_teknisi_id = req.user.user_id;
         }
 
@@ -526,7 +525,10 @@ const validateRealisasiEligibility = async (
     const jenis = await Jenis.findByPk(jadwal.jdw_jenis_id, {
         attributes: ["jenis_id", "jenis_gap_hari"],
     });
-    const gapHari = Number(jenis?.jenis_gap_hari || 0);
+    const gapHari = Math.max(
+        Number(jadwal.jdw_gap_hari || 0),
+        Number(jenis?.jenis_gap_hari || 0),
+    );
     if (gapHari > 0) {
         const lastSelesai = await Realisasi.findOne({
             where: {
@@ -1013,8 +1015,13 @@ const getKendala = async (req, res, next) => {
 
         const isAdmin = isAdminUser(req);
         const isManager = isManagerUser(req);
+        const isSelfOnly = isSelfOnlyRealisasiRole(req);
         const userDivisi =
             normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
+
+        if (isSelfOnly) {
+            where.real_teknisi_id = req.user.user_id;
+        }
 
         const includeJadwal = {
             model: Jadwal,
@@ -1203,7 +1210,7 @@ const exportExcel = async (req, res, next) => {
         const userDivisi =
             normalizeDivisi(req.user.user_divisi) || req.user.user_divisi;
 
-        if (isSelfOnly && !jadwal_id) {
+        if (isSelfOnly) {
             where.real_teknisi_id = req.user.user_id;
         }
 
@@ -1268,9 +1275,11 @@ const exportExcel = async (req, res, next) => {
             ],
         });
 
-        // Filter teknisi nama jika teknisi_id dipasang
+        // Filter teknisi nama jika teknisi_id dipasang atau self-only
         let filterTeknisiNama = "Semua Pelaksana";
-        if (teknisi_id) {
+        if (isSelfOnly) {
+            filterTeknisiNama = req.user.user_nama;
+        } else if (teknisi_id) {
             const teknisiUser = await User.findByPk(teknisi_id, {
                 attributes: ["user_nama"],
             });
@@ -1351,6 +1360,11 @@ const exportExcel = async (req, res, next) => {
             };
             if (targetDivisi) {
                 jadwalWhere.jdw_divisi = targetDivisi;
+            }
+            if (isSelfOnly) {
+                jadwalWhere.jdw_assigned_to = req.user.user_id;
+            } else if (teknisi_id) {
+                jadwalWhere.jdw_assigned_to = teknisi_id;
             }
 
             const activeJadwalList = await Jadwal.findAll({
@@ -1662,6 +1676,10 @@ const getHistorySummary = async (req, res, next) => {
 
         if (queryDivisi) {
             jadwalWhere.jdw_divisi = queryDivisi;
+        }
+
+        if (targetUserId) {
+            jadwalWhere.jdw_assigned_to = targetUserId;
         }
 
         const activeJadwalList = await Jadwal.findAll({

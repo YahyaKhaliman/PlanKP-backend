@@ -54,11 +54,17 @@ const serializeJadwal = (item) => {
     plain.assigned_user = plain.jdw_assigned_to_plan_user || null;
     plain.dibuat_user = plain.jdw_dibuat_oleh_plan_user || null;
 
+    const gapHari = Math.max(
+        Number(plain.jdw_gap_hari || 0),
+        Number(plain.jenis_gap_hari || plain.plan_jeni?.jenis_gap_hari || 0),
+    );
+
     const countdown = calculateJadwalCountdown({
         startDate: plain.jdw_tgl_mulai,
         frekuensi: plain.jdw_frekuensi,
         target: plain.jdw_target,
         selesaiUnit: plain.jdw_selesai_unit,
+        gapHari,
     });
 
     plain.jdw_period_fulfilled = countdown.periodFulfilled;
@@ -127,8 +133,49 @@ const buildCurrentPeriodDoneCountLiteral = () => `(
         )
         OR (
             plan_jadwal.jdw_frekuensi = 'Bulanan'
-            AND r.real_tahun = YEAR(CURDATE())
-            AND r.real_bulan = MONTH(CURDATE())
+            AND (
+                CASE
+                    WHEN GREATEST(
+                        COALESCE(plan_jadwal.jdw_gap_hari, 0),
+                        COALESCE((SELECT j.jenis_gap_hari FROM plan_jenis j WHERE j.jenis_id = plan_jadwal.jdw_jenis_id), 0)
+                    ) >= 30 THEN (
+                        r.real_tgl >= DATE_ADD(
+                            plan_jadwal.jdw_tgl_mulai,
+                            INTERVAL (
+                                FLOOR(
+                                    GREATEST(0, PERIOD_DIFF(EXTRACT(YEAR_MONTH FROM CURDATE()), EXTRACT(YEAR_MONTH FROM plan_jadwal.jdw_tgl_mulai)))
+                                    / GREATEST(1, ROUND(GREATEST(
+                                        COALESCE(plan_jadwal.jdw_gap_hari, 0),
+                                        COALESCE((SELECT j.jenis_gap_hari FROM plan_jenis j WHERE j.jenis_id = plan_jadwal.jdw_jenis_id), 0)
+                                    ) / 30))
+                                ) * GREATEST(1, ROUND(GREATEST(
+                                        COALESCE(plan_jadwal.jdw_gap_hari, 0),
+                                        COALESCE((SELECT j.jenis_gap_hari FROM plan_jenis j WHERE j.jenis_id = plan_jadwal.jdw_jenis_id), 0)
+                                    ) / 30))
+                            ) MONTH
+                        )
+                        AND r.real_tgl < DATE_ADD(
+                            plan_jadwal.jdw_tgl_mulai,
+                            INTERVAL (
+                                (FLOOR(
+                                    GREATEST(0, PERIOD_DIFF(EXTRACT(YEAR_MONTH FROM CURDATE()), EXTRACT(YEAR_MONTH FROM plan_jadwal.jdw_tgl_mulai)))
+                                    / GREATEST(1, ROUND(GREATEST(
+                                        COALESCE(plan_jadwal.jdw_gap_hari, 0),
+                                        COALESCE((SELECT j.jenis_gap_hari FROM plan_jenis j WHERE j.jenis_id = plan_jadwal.jdw_jenis_id), 0)
+                                    ) / 30))
+                                ) + 1) * GREATEST(1, ROUND(GREATEST(
+                                        COALESCE(plan_jadwal.jdw_gap_hari, 0),
+                                        COALESCE((SELECT j.jenis_gap_hari FROM plan_jenis j WHERE j.jenis_id = plan_jadwal.jdw_jenis_id), 0)
+                                    ) / 30))
+                            ) MONTH
+                        )
+                    )
+                    ELSE (
+                        r.real_tahun = YEAR(CURDATE())
+                        AND r.real_bulan = MONTH(CURDATE())
+                    )
+                END
+            )
         )
       )
 )`;
@@ -150,6 +197,14 @@ const buildComputedAttributes = () => {
                   )
             )`),
             "jdw_total_unit",
+        ],
+        [
+            sequelize.literal(`(
+                SELECT j.jenis_gap_hari
+                FROM plan_jenis j
+                WHERE j.jenis_id = plan_jadwal.jdw_jenis_id
+            )`),
+            "jenis_gap_hari",
         ],
         [sequelize.literal(currentPeriodDoneCount), "jdw_selesai_unit"],
         [
@@ -466,9 +521,22 @@ const getHariLibur = async (req, res, next) => {
             });
         }
 
-        // Jika divisi BUKAN divisi 6 hari kerja (misal 5 hari kerja atau default),
+        const onlyDb =
+            String(req.query.only_db || req.query.onlyDb || "").toLowerCase() === "true" ||
+            String(req.query.only_db || "").trim() === "1";
+        const isManager =
+            String(req.user?.user_jabatan || "").toLowerCase() === "manager";
+        const isRealisasiMenu =
+            String(req.query.menu || "").toLowerCase() === "realisasi";
+
+        // Khusus role manager pada menu realisasi atau saat parameter only_db aktif:
+        // Tidak usah menyertakan hari libur divisi (Sabtu efisiensi), hanya ambil tanggal libur dari database.
+        const skipSabtu =
+            onlyDb || (isManager && (isRealisasiMenu || !req.query.divisi));
+
+        // Jika divisi BUKAN divisi 6 hari kerja dan tidak dalam mode skipSabtu,
         // sertakan semua hari Sabtu di bulan tersebut sebagai hari libur
-        if (!is6DaysDivisi(divisi)) {
+        if (!skipSabtu && !is6DaysDivisi(divisi)) {
             const monthEndDate = new Date(year, month, 0);
             const totalDays = monthEndDate.getDate();
             for (let d = 1; d <= totalDays; d++) {
@@ -618,20 +686,14 @@ const getAll = async (req, res, next) => {
 
         const isAdmin = req.user.user_jabatan === "admin";
         const isManager = req.user.user_jabatan === "manager";
-        const isUserRole = ["user", "teknisi", "it_support"].includes(
-            String(req.user.user_jabatan || "").toLowerCase(),
-        );
         const userDivisi = getUserDivisiScope(req);
-        if (isUserRole) {
+
+        if (!isAdmin && !isManager) {
             where.jdw_assigned_to = req.user.user_id;
-        } else if (!isAdmin && !isManager) {
-            where[Op.and] = where[Op.and] || [];
-            where[Op.and].push({
-                [Op.or]: [
-                    { jdw_divisi: userDivisi },
-                    { jdw_assigned_to: req.user.user_id },
-                ],
-            });
+        } else if (isAdmin) {
+            if (!where.jdw_divisi) {
+                where.jdw_divisi = userDivisi;
+            }
         }
 
         const queryOptions = {
@@ -783,6 +845,7 @@ const getByDivisi = async (req, res, next) => {
         const { hasPagination, limit, offset } = parsePagination(req.query);
         const order = resolveJadwalSort(req.query.sort, req.query.order);
         const isAdmin = req.user.user_jabatan === "admin";
+        const isManager = req.user.user_jabatan === "manager";
         const userDivisi = getUserDivisiScope(req);
         const userId = req.user.user_id;
 
@@ -792,8 +855,12 @@ const getByDivisi = async (req, res, next) => {
                 { jdw_divisi: userDivisi },
                 { jdw_assigned_to: userId },
             ];
+        } else if (isManager) {
+            if (req.query.divisi) {
+                where.jdw_divisi = normalizeDivisi(req.query.divisi);
+            }
         } else {
-            where.jdw_divisi = userDivisi;
+            where.jdw_assigned_to = userId;
         }
         if (status) {
             if (status !== "all" && status !== "*") {
@@ -969,7 +1036,10 @@ const getOne = async (req, res, next) => {
         const jenisData = await Jenis.findByPk(data.jdw_jenis_id, {
             attributes: ["jenis_id", "jenis_gap_hari", "jenis_nama"],
         });
-        const gapHari = Number(jenisData?.jenis_gap_hari || 0);
+        const gapHari = Math.max(
+            Number(data.jdw_gap_hari || 0),
+            Number(jenisData?.jenis_gap_hari || 0),
+        );
         const todayDate = normalizeDateOnly(new Date());
 
         let inventoryWithGap = inventarisList.map((inv) => {
@@ -978,11 +1048,13 @@ const getOne = async (req, res, next) => {
                 ...plain,
                 inv_jenis: jenisData?.jenis_nama || plain.inv_jenis_id,
                 inv_is_gap_eligible: true,
+                inv_last_realisasi_tgl: null,
                 inv_next_eligible_date: null,
+                inv_gap_sisa_hari: 0,
             };
         });
 
-        if (gapHari > 0 && todayDate) {
+        if (todayDate) {
             const invIds = inventoryWithGap.map((inv) => inv.inv_id);
             if (invIds.length > 0) {
                 const latestRows = await Realisasi.findAll({
@@ -1015,28 +1087,54 @@ const getOne = async (req, res, next) => {
                     const lastDate = normalizeDateOnly(lastDateRaw);
                     if (!lastDate) return inv;
 
-                    const nextEligible = addDays(lastDate, gapHari);
-                    const eligible = todayDate >= nextEligible;
+                    let eligible = true;
+                    let nextEligible = null;
+                    let sisaHari = 0;
+
+                    if (gapHari > 0) {
+                        nextEligible = addDays(lastDate, gapHari);
+                        eligible = todayDate >= nextEligible;
+                        if (!eligible) {
+                            sisaHari = Math.max(
+                                1,
+                                Math.ceil((nextEligible - todayDate) / 86400000),
+                            );
+                        }
+                    }
 
                     return {
                         ...inv,
+                        inv_last_realisasi_tgl: formatDateOnlyLocal(lastDate),
                         inv_is_gap_eligible: eligible,
-                        inv_next_eligible_date:
-                            formatDateOnlyLocal(nextEligible),
+                        inv_next_eligible_date: nextEligible
+                            ? formatDateOnlyLocal(nextEligible)
+                            : null,
+                        inv_gap_sisa_hari: sisaHari,
                     };
                 });
             }
         }
 
-        // Hitung unit inventaris yang SUDAH direalisasikan hari ini di plan_realisasi (oleh user mana pun)
+        // Hitung unit inventaris yang SUDAH direalisasikan pada siklus/periode saat ini
+        let periodCondition = "r.real_tgl = CURDATE()";
+        if (data.jdw_frekuensi === "Mingguan") {
+            periodCondition =
+                "r.real_tahun = YEAR(CURDATE()) AND r.real_week_number = WEEK(CURDATE(), 3)";
+        } else if (data.jdw_frekuensi === "Bulanan") {
+            periodCondition =
+                "r.real_tahun = YEAR(CURDATE()) AND r.real_bulan = MONTH(CURDATE())";
+        }
+
         const doneRows = await sequelize.query(
             `
             SELECT DISTINCT r.real_inv_id
             FROM plan_realisasi r
-            WHERE r.real_tgl = CURDATE()
+            WHERE r.real_jadwal_id = :jadwalId
+              AND ${periodCondition}
               AND r.real_status IN ('Draft', 'Submitted', 'Approved', 'Selesai')
             `,
             {
+                replacements: { jadwalId: data.jdw_id },
                 type: QueryTypes.SELECT,
             },
         );
@@ -1045,10 +1143,14 @@ const getOne = async (req, res, next) => {
             doneRows.map((row) => Number(row.real_inv_id)),
         );
 
-        inventoryWithGap = inventoryWithGap.map((inv) => ({
-            ...inv,
-            inv_is_done_current_period: doneInvIdSet.has(Number(inv.inv_id)),
-        }));
+        inventoryWithGap = inventoryWithGap.map((inv) => {
+            const isDonePeriod = doneInvIdSet.has(Number(inv.inv_id));
+            const isWithinGap = inv.inv_is_gap_eligible === false;
+            return {
+                ...inv,
+                inv_is_done_current_period: isDonePeriod || isWithinGap,
+            };
+        });
 
         const eligibleInventaris = inventoryWithGap.filter(
             (inv) => inv.inv_is_gap_eligible,

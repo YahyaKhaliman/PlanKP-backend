@@ -79,11 +79,40 @@ const register = async (req, res, next) => {
     }
 };
 
+const resolveClientPlatform = (req, bodyPlatform) => {
+    if (bodyPlatform && typeof bodyPlatform === "string" && bodyPlatform.trim()) {
+        return bodyPlatform.trim();
+    }
+    const ua = (req.get("user-agent") || "").toLowerCase();
+    if (ua.includes("android")) return "Android";
+    if (ua.includes("iphone") || ua.includes("ipad") || ua.includes("ios")) return "iOS";
+    if (ua.includes("dart") || ua.includes("okhttp") || ua.includes("cfnetwork")) return "Mobile";
+    if (ua.includes("mozilla") || ua.includes("chrome") || ua.includes("safari") || ua.includes("edge")) return "Web";
+    return "App";
+};
+
+const formatVersionString = (appVersion, platform) => {
+    const rawVersion = String(appVersion || "1.0.0").trim();
+    if (rawVersion.includes("(") && rawVersion.includes(")")) {
+        return rawVersion.substring(0, 50);
+    }
+    const combined = platform ? `${rawVersion} (${platform})` : rawVersion;
+    return combined.substring(0, 50);
+};
+
 const login = async (req, res, next) => {
     try {
-        const { user_nama, user_password, app_version } = req.body ?? {};
+        const { user_nama, user_password, app_version, platform } = req.body ?? {};
+        const clientPlatform = resolveClientPlatform(req, platform);
+        const logVersi = formatVersionString(app_version, clientPlatform);
+
         if (!user_nama || !user_password) {
-            await writeLog(user_nama, "GAGAL", "Password tidak diisi", app_version);
+            await writeLog(
+                user_nama,
+                "GAGAL",
+                `Password tidak diisi (via ${clientPlatform})`,
+                logVersi,
+            );
             return response.error(
                 res,
                 "Nama pengguna dan password wajib diisi",
@@ -96,7 +125,12 @@ const login = async (req, res, next) => {
         });
 
         if (!user || user.user_password !== user_password) {
-            await writeLog(user_nama, "GAGAL", "Nama pengguna atau password salah", app_version);
+            await writeLog(
+                user_nama,
+                "GAGAL",
+                `Nama pengguna atau password salah (via ${clientPlatform})`,
+                logVersi,
+            );
             return response.error(res, "Nama pengguna atau password salah", 401);
         }
 
@@ -104,7 +138,12 @@ const login = async (req, res, next) => {
         delete plain.user_password;
         const token = generateToken(plain);
 
-        await writeLog(user_nama, "BERHASIL", "Login berhasil", app_version);
+        await writeLog(
+            user_nama,
+            "BERHASIL",
+            `Login berhasil via ${clientPlatform}`,
+            logVersi,
+        );
         return response.ok(res, { token, user: plain }, "Login berhasil");
     } catch (err) {
         next(err);

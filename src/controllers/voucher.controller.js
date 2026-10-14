@@ -312,10 +312,10 @@ exports.getVouchers = async (req, res, next) => {
 
         const pemohonWhere = {};
         // Manager bisa melihat semua; Admin divisi tertentu (misal driver) hanya melihat divisinya
-        if (divisi && divisi !== "Semua") {
-            pemohonWhere.user_divisi = divisi;
-        } else if (isAdmin && req.user.user_divisi) {
+        if (isAdmin && req.user.user_divisi) {
             pemohonWhere.user_divisi = req.user.user_divisi;
+        } else if (isManager && divisi && divisi !== "Semua") {
+            pemohonWhere.user_divisi = divisi;
         }
 
         const offset = (parseInt(page, 10) - 1) * parseInt(limit, 10);

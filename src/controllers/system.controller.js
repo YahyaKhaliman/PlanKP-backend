@@ -335,9 +335,13 @@ const getMetadata = async (req, res, next) => {
             fetchPabrikList(),
         ]);
 
+        const divisiOptions = req.adminScope
+            ? [req.adminScope]
+            : DIVISI_CANONICAL;
+
         return response.ok(res, {
-            divisi: DIVISI_CANONICAL,
-            kategori_jenis: JENIS_KATEGORI,
+            divisi: divisiOptions,
+            kategori_jenis: divisiOptions,
             jadwal_frekuensi: JADWAL_FREKUENSI,
             jadwal_status: JADWAL_STATUS,
             realisasi_status: REALISASI_STATUS,

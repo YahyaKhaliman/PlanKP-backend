@@ -167,7 +167,9 @@ const getAll = async (req, res, next) => {
         }
 
         let targetDivisi = null;
-        if (
+        if (isAdmin) {
+            targetDivisi = userDivisi;
+        } else if (
             divisi &&
             String(divisi).toLowerCase() !== "true" &&
             String(divisi).toLowerCase() !== "false"
@@ -343,7 +345,7 @@ const getOne = async (req, res, next) => {
                     403,
                 );
             }
-        } else if (!isAdmin && !isManager) {
+        } else if (!isManager) {
             if (row.jdw_divisi && row.jdw_divisi !== userDivisi) {
                 return response.error(
                     res,
@@ -1036,7 +1038,9 @@ const getKendala = async (req, res, next) => {
         };
 
         let targetDivisiKendala = null;
-        if (
+        if (isAdmin) {
+            targetDivisiKendala = userDivisi;
+        } else if (
             divisi &&
             String(divisi).toLowerCase() !== "true" &&
             String(divisi).toLowerCase() !== "false"
@@ -1048,7 +1052,7 @@ const getKendala = async (req, res, next) => {
             } else if (String(req.query.by_divisi).toLowerCase() !== "false") {
                 targetDivisiKendala = req.query.by_divisi;
             }
-        } else if (!isAdmin && !isManager) {
+        } else if (!isManager) {
             targetDivisiKendala = userDivisi;
         }
 
@@ -1215,7 +1219,9 @@ const exportExcel = async (req, res, next) => {
         }
 
         let targetDivisi = null;
-        if (
+        if (isAdmin) {
+            targetDivisi = userDivisi;
+        } else if (
             divisi &&
             String(divisi).toLowerCase() !== "true" &&
             String(divisi).toLowerCase() !== "false"

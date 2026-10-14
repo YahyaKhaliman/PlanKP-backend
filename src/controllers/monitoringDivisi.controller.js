@@ -35,8 +35,9 @@ const getMonitoringDivisi = async (req, res, next) => {
         const holidays = await getHolidaysForMonth(queryTahun, queryBulan);
 
         const result = [];
+        const targetDivisiList = req.adminScope ? [req.adminScope] : DIVISI_CANONICAL;
 
-        for (const divisi of DIVISI_CANONICAL) {
+        for (const divisi of targetDivisiList) {
             const jenisList = await Jenis.findAll({
                 where: {
                     jenis_kategori: divisi,

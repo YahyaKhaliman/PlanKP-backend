@@ -665,13 +665,6 @@ const getAll = async (req, res, next) => {
                 ),
             );
         }
-        if (divisi) {
-            const normalizedDivisi = normalizeDivisi(divisi);
-            if (!normalizedDivisi)
-                return response.error(res, "Divisi tidak valid", 400);
-            where.jdw_divisi = normalizedDivisi;
-        }
-
         // filter jadwal yang aktif pada tanggal tertentu
         if (tgl) {
             where[Op.and] = where[Op.and] || [];
@@ -688,12 +681,17 @@ const getAll = async (req, res, next) => {
         const isManager = req.user.user_jabatan === "manager";
         const userDivisi = getUserDivisiScope(req);
 
-        if (!isAdmin && !isManager) {
-            where.jdw_assigned_to = req.user.user_id;
-        } else if (isAdmin) {
-            if (!where.jdw_divisi) {
-                where.jdw_divisi = userDivisi;
+        if (isAdmin) {
+            where.jdw_divisi = userDivisi;
+        } else if (isManager) {
+            if (divisi) {
+                const normalizedDivisi = normalizeDivisi(divisi);
+                if (!normalizedDivisi)
+                    return response.error(res, "Divisi tidak valid", 400);
+                where.jdw_divisi = normalizedDivisi;
             }
+        } else {
+            where.jdw_assigned_to = req.user.user_id;
         }
 
         const queryOptions = {

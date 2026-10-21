@@ -7,6 +7,7 @@ const {
     sequelize,
 } = require("../models");
 const { Op, QueryTypes } = require("sequelize");
+const ExcelJS = require("exceljs");
 const response = require("../utils/response");
 const { normalizeDivisi } = require("../utils/divisi");
 const { parsePagination, buildMeta } = require("../utils/pagination");
@@ -522,7 +523,9 @@ const getHariLibur = async (req, res, next) => {
         }
 
         const onlyDb =
-            String(req.query.only_db || req.query.onlyDb || "").toLowerCase() === "true" ||
+            String(
+                req.query.only_db || req.query.onlyDb || "",
+            ).toLowerCase() === "true" ||
             String(req.query.only_db || "").trim() === "1";
         const isManager =
             String(req.user?.user_jabatan || "").toLowerCase() === "manager";
@@ -1095,7 +1098,9 @@ const getOne = async (req, res, next) => {
                         if (!eligible) {
                             sisaHari = Math.max(
                                 1,
-                                Math.ceil((nextEligible - todayDate) / 86400000),
+                                Math.ceil(
+                                    (nextEligible - todayDate) / 86400000,
+                                ),
                             );
                         }
                     }
@@ -1177,7 +1182,7 @@ const ensurePabrikKodeLength = async () => {
     if (ensurePabrikKodeLengthDone) return;
     try {
         await sequelize.query(
-            "ALTER TABLE plan_jadwal MODIFY COLUMN jdw_pabrik_kode VARCHAR(255) NULL"
+            "ALTER TABLE plan_jadwal MODIFY COLUMN jdw_pabrik_kode VARCHAR(255) NULL",
         );
         ensurePabrikKodeLengthDone = true;
     } catch (e) {
@@ -1470,8 +1475,10 @@ const update = async (req, res, next) => {
             if (req.body[f] !== undefined) data[f] = req.body[f];
         });
         if (req.body.jdw_assigned_to === undefined) {
-            if (req.body.jdw_user_id !== undefined) data.jdw_assigned_to = req.body.jdw_user_id;
-            else if (req.body.assigned_to !== undefined) data.jdw_assigned_to = req.body.assigned_to;
+            if (req.body.jdw_user_id !== undefined)
+                data.jdw_assigned_to = req.body.jdw_user_id;
+            else if (req.body.assigned_to !== undefined)
+                data.jdw_assigned_to = req.body.assigned_to;
         }
         if (req.body.jdw_divisi !== undefined) {
             const normalizedDivisi =
@@ -1741,7 +1748,11 @@ const renew = async (req, res, next) => {
 
         if (req.adminScope && oldJadwal.jdw_divisi !== req.adminScope) {
             await t.rollback();
-            return response.error(res, "Akses jadwal lintas divisi ditolak", 403);
+            return response.error(
+                res,
+                "Akses jadwal lintas divisi ditolak",
+                403,
+            );
         }
 
         const {
@@ -1782,7 +1793,9 @@ const renew = async (req, res, next) => {
             );
         }
 
-        if (new Date(resolvedTglSelesaiOld) < new Date(oldJadwal.jdw_tgl_mulai)) {
+        if (
+            new Date(resolvedTglSelesaiOld) < new Date(oldJadwal.jdw_tgl_mulai)
+        ) {
             await t.rollback();
             return response.error(
                 res,
@@ -1862,7 +1875,9 @@ const renew = async (req, res, next) => {
 
         const resolvedPabrikKode =
             jdw_pabrik_kode_new !== undefined
-                ? (jdw_pabrik_kode_new ? String(jdw_pabrik_kode_new).trim() : null)
+                ? jdw_pabrik_kode_new
+                    ? String(jdw_pabrik_kode_new).trim()
+                    : null
                 : oldJadwal.jdw_pabrik_kode;
 
         const resolvedAssignedTo =
@@ -1918,6 +1933,466 @@ const renew = async (req, res, next) => {
     }
 };
 
+const exportExcel = async (req, res, next) => {
+    try {
+        const {
+            bulan,
+            tahun,
+            divisi,
+            status,
+            frekuensi,
+            assigned_to,
+            teknisi_id,
+        } = req.query;
+
+        const where = {};
+
+        // 1. Role-based Scope
+        const isAdmin = req.user.user_jabatan === "admin";
+        const isManager = req.user.user_jabatan === "manager";
+        const userDivisi = getUserDivisiScope(req);
+
+        let targetDivisi = null;
+        if (isAdmin) {
+            targetDivisi = userDivisi;
+            where.jdw_divisi = userDivisi;
+        } else if (isManager) {
+            if (divisi && String(divisi).toLowerCase() !== "semua divisi") {
+                const normalizedDivisi = normalizeDivisi(divisi);
+                if (normalizedDivisi) {
+                    targetDivisi = normalizedDivisi;
+                    where.jdw_divisi = normalizedDivisi;
+                }
+            }
+        } else {
+            // User / Teknisi biasa
+            targetDivisi = userDivisi;
+            where.jdw_divisi = userDivisi;
+            where.jdw_assigned_to = req.user.user_id;
+        }
+
+        // 2. Filter Pelaksana spesifik jika dipilih (oleh Admin / Manager)
+        const targetAssignedTo = teknisi_id || assigned_to;
+        if (targetAssignedTo && (isAdmin || isManager)) {
+            where.jdw_assigned_to = targetAssignedTo;
+        }
+
+        // 3. Filter Status
+        if (
+            status &&
+            status !== "all" &&
+            status !== "*" &&
+            String(status).toLowerCase() !== "semua"
+        ) {
+            where.jdw_status = status;
+        } else if (!status) {
+            where.jdw_status = "Aktif";
+        }
+
+        // 4. Filter Frekuensi
+        if (
+            frekuensi &&
+            frekuensi !== "all" &&
+            String(frekuensi).toLowerCase() !== "semua frekuensi"
+        ) {
+            where.jdw_frekuensi = frekuensi;
+        }
+
+        // 5. Filter Rentang Bulan & Tahun
+        const mNum = bulan ? Number(bulan) : new Date().getMonth() + 1;
+        const yNum = tahun ? Number(tahun) : new Date().getFullYear();
+
+        const startOfMonthStr = `${yNum}-${String(mNum).padStart(2, "0")}-01`;
+        const endDay = new Date(yNum, mNum, 0).getDate();
+        const endOfMonthStr = `${yNum}-${String(mNum).padStart(2, "0")}-${String(endDay).padStart(2, "0")}`;
+
+        where[Op.and] = where[Op.and] || [];
+        where[Op.and].push({ jdw_tgl_mulai: { [Op.lte]: endOfMonthStr } });
+        where[Op.and].push({
+            [Op.or]: [
+                { jdw_tgl_selesai: null },
+                { jdw_tgl_selesai: { [Op.gte]: startOfMonthStr } },
+            ],
+        });
+
+        // 6. Fetch Data
+        const items = await Jadwal.findAll({
+            where,
+            attributes: {
+                include: buildComputedAttributes(),
+            },
+            include: [
+                {
+                    model: User,
+                    as: "jdw_assigned_to_plan_user",
+                    attributes: [
+                        "user_id",
+                        "user_nama",
+                        "user_jabatan",
+                        "user_divisi",
+                    ],
+                },
+                {
+                    model: Jenis,
+                    as: "jdw_jenis",
+                    attributes: ["jenis_id", "jenis_nama", "jenis_kategori"],
+                },
+            ],
+            order: [
+                ["jdw_frekuensi", "ASC"],
+                ["jdw_tgl_mulai", "ASC"],
+                ["jdw_id", "ASC"],
+            ],
+        });
+
+        const serializedList = items.map(serializeJadwal);
+
+        // Cari nama pelaksana untuk judul jika difilter
+        let pelaksanaLabel = "Semua Pelaksana";
+        if (!isAdmin && !isManager) {
+            pelaksanaLabel = req.user.user_nama;
+        } else if (targetAssignedTo) {
+            const pUser = await User.findByPk(targetAssignedTo, {
+                attributes: ["user_nama"],
+            });
+            if (pUser) pelaksanaLabel = pUser.user_nama;
+        }
+
+        const months = [
+            "Januari",
+            "Februari",
+            "Maret",
+            "April",
+            "Mei",
+            "Juni",
+            "Juli",
+            "Agustus",
+            "September",
+            "Oktober",
+            "November",
+            "Desember",
+        ];
+        const monthLabel = months[mNum - 1] || `${mNum}`;
+        const yearLabel = `${yNum}`;
+        const divisiLabel = targetDivisi || "Semua Divisi";
+
+        // Build Excel Workbook
+        const workbook = new ExcelJS.Workbook();
+        workbook.creator = "PlanKP System";
+        workbook.created = new Date();
+
+        const sheet = workbook.addWorksheet("Jadwal Maintenance", {
+            pageSetup: { paperSize: 9, orientation: "landscape" },
+        });
+
+        const now = new Date();
+        const d = String(now.getDate()).padStart(2, "0");
+        const m = String(now.getMonth() + 1).padStart(2, "0");
+        const y = now.getFullYear();
+        const hh = String(now.getHours()).padStart(2, "0");
+        const mm = String(now.getMinutes()).padStart(2, "0");
+        const printStr = `${d}/${m}/${y} ${hh}:${mm}`;
+
+        // Header Row 1: Judul
+        sheet.getCell("A1").value =
+            "CV. KENCANA PRINT — LAPORAN JADWAL MAINTENANCE";
+        sheet.getCell("A1").font = {
+            name: "Calibri",
+            size: 13,
+            bold: true,
+            color: { argb: "0D3B6E" },
+        };
+        sheet.mergeCells("A1:I1");
+
+        sheet.getCell("J1").value = `Dicetak: ${printStr}`;
+        sheet.getCell("J1").font = {
+            name: "Calibri",
+            size: 9,
+            color: { argb: "64748B" },
+        };
+        sheet.getCell("J1").alignment = {
+            vertical: "middle",
+            horizontal: "right",
+        };
+        sheet.mergeCells("J1:L1");
+
+        // Hitung total unit dan rata-rata persentase
+        let totalTargetUnit = 0;
+        let totalSelesaiUnit = 0;
+        serializedList.forEach((j) => {
+            const tgt = j.jdw_target || j.jdw_total_unit || 0;
+            const sls = j.jdw_selesai_unit || 0;
+            totalTargetUnit += tgt;
+            totalSelesaiUnit += sls;
+        });
+        const totalPctOverall =
+            totalTargetUnit > 0
+                ? Math.min(
+                      100,
+                      Math.round((totalSelesaiUnit / totalTargetUnit) * 100),
+                  )
+                : totalSelesaiUnit > 0
+                  ? 100
+                  : 0;
+
+        // Header Row 2: Subtitle Info Filter
+        sheet.getCell("A2").value =
+            `Divisi: ${divisiLabel}  |  Periode: ${monthLabel} ${yearLabel}  |  Pelaksana: ${pelaksanaLabel}  |  Total Jadwal: ${serializedList.length}  |  Unit Selesai: ${totalSelesaiUnit}/${totalTargetUnit} (${totalPctOverall}%)`;
+        sheet.getCell("A2").font = {
+            name: "Calibri",
+            size: 9.5,
+            bold: true,
+            color: { argb: "0F172A" },
+        };
+        sheet.mergeCells("A2:L2");
+
+        // Row 3: Garis aksen
+        for (let col = 1; col <= 12; col++) {
+            const cell = sheet.getCell(3, col);
+            cell.border = {
+                bottom: { style: "medium", color: { argb: "0D3B6E" } },
+            };
+        }
+
+        // Row 4: Header Tabel Kolom (12 Kolom)
+        // Opsi B: Mulai Kapan dan Frekuensi & Target diperjelas secara informatif dan ramah awam
+        const headers = [
+            "No",
+            "Nama Jadwal / Kegiatan",
+            "Jenis Inventaris",
+            "Divisi",
+            "Lokasi Pabrik",
+            "Pelaksana",
+            "Jadwal Mulai",
+            "Frekuensi & Target",
+            "Jatuh Tempo Periode",
+            "Target Unit",
+            "Realisasi Selesai",
+            "Persentase",
+        ];
+
+        const headerRow = sheet.getRow(4);
+        headers.forEach((h, idx) => {
+            headerRow.getCell(idx + 1).value = h;
+        });
+        headerRow.font = {
+            name: "Calibri",
+            size: 10.5,
+            bold: true,
+            color: { argb: "FFFFFF" },
+        };
+        headerRow.height = 24;
+
+        headerRow.eachCell((cell) => {
+            cell.fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: "1E293B" },
+            };
+            cell.alignment = { vertical: "middle", horizontal: "center" };
+            cell.border = {
+                top: { style: "thin", color: { argb: "94A3B8" } },
+                bottom: { style: "medium", color: { argb: "0F172A" } },
+                left: { style: "thin", color: { argb: "334155" } },
+                right: { style: "thin", color: { argb: "334155" } },
+            };
+        });
+
+        sheet.autoFilter = "A4:L4";
+        sheet.views = [{ state: "frozen", xSplit: 0, ySplit: 4 }];
+
+        // Helper format tanggal singkat (DD MMM YYYY)
+        const formatShortDate = (dateVal) => {
+            if (!dateVal) return null;
+            const parts = String(dateVal).split("-");
+            if (parts.length === 3) {
+                const mIdx = Number(parts[1]) - 1;
+                const mShort = months[mIdx]
+                    ? months[mIdx].substring(0, 3)
+                    : parts[1];
+                return `${parts[2]} ${mShort} ${parts[0]}`;
+            }
+            return String(dateVal);
+        };
+
+        // Hitung tanggal pasti untuk jatuh tempo periode:
+        // 1. Harian: Tanggal besok
+        const tomorrowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        const tomorrowStr = formatShortDate(formatDateOnly(tomorrowDate));
+
+        // 2. Mingguan: Tanggal akhir minggu ini (hari Minggu)
+        const curDay = now.getDay();
+        const daysToSunday = curDay === 0 ? 0 : 7 - curDay;
+        const sundayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysToSunday);
+        const endOfWeekStr = formatShortDate(formatDateOnly(sundayDate));
+
+        // 3. Bulanan: Tanggal akhir bulan pada periode laporan yang dipilih
+        const endOfMonthDate = new Date(yNum, mNum, 0);
+        const dueEndOfMonthStr = formatShortDate(formatDateOnly(endOfMonthDate));
+
+        // Row 5+: Data Baris
+        serializedList.forEach((j, index) => {
+            const rowNumber = index + 5;
+            const row = sheet.getRow(rowNumber);
+
+            const jenisNama = j.jdw_jenis?.jenis_nama || j.jdw_inv_jenis || "-";
+            const pabrikList =
+                Array.isArray(j.jdw_pabrik_list) && j.jdw_pabrik_list.length > 0
+                    ? j.jdw_pabrik_list.join(", ")
+                    : j.jdw_pabrik_kode || "Semua Pabrik";
+            const picNama = j.assigned_user?.user_nama || "-";
+
+            const target = j.jdw_target || j.jdw_total_unit || 0;
+            const selesai = j.jdw_selesai_unit || 0;
+            const pctVal =
+                target > 0
+                    ? Math.min(100, Math.round((selesai / target) * 100))
+                    : selesai > 0
+                      ? 100
+                      : 0;
+
+            // 1. Format Mulai Kapan: Tanggal Mulai s/d Tanggal Selesai (atau Rutin jika null)
+            const startStr = formatShortDate(j.jdw_tgl_mulai) || "-";
+            const endStr = formatShortDate(j.jdw_tgl_selesai) || "Rutin";
+            const mulaiKapanStr = `${startStr} s/d ${endStr}`;
+
+            // 2. Format Frekuensi & Target (Contoh: "Harian (2 Unit / Hari)", "Mingguan (5 Unit / Minggu)")
+            const freq = j.jdw_frekuensi || "Lainnya";
+            const tgtPerFreq = j.jdw_target || j.jdw_total_unit || 1;
+            let unitSatuan = "Periode";
+            if (freq === "Harian") unitSatuan = "Hari";
+            else if (freq === "Mingguan") unitSatuan = "Minggu";
+            else if (freq === "Bulanan") unitSatuan = "Bulan";
+            const freqTargetStr = `${freq} (${tgtPerFreq} Unit / ${unitSatuan})`;
+
+            // 3. Jatuh Tempo Periode (Tanggal pasti: besok untuk harian, akhir minggu ini untuk mingguan, akhir bulan untuk bulanan)
+            let dueDateStr = "-";
+            if (freq === "Harian") {
+                dueDateStr = tomorrowStr || "-";
+            } else if (freq === "Mingguan") {
+                dueDateStr = endOfWeekStr || "-";
+            } else if (freq === "Bulanan") {
+                dueDateStr = dueEndOfMonthStr || "-";
+            } else if (j.jdw_next_due_date) {
+                const formattedDue = formatShortDate(j.jdw_next_due_date);
+                dueDateStr = formattedDue || String(j.jdw_next_due_date);
+            }
+
+            row.getCell(1).value = index + 1;
+            row.getCell(2).value = j.jdw_judul || "-";
+            row.getCell(3).value = jenisNama;
+            row.getCell(4).value = j.jdw_divisi || "-";
+            row.getCell(5).value = pabrikList;
+            row.getCell(6).value = picNama;
+            row.getCell(7).value = mulaiKapanStr;
+            row.getCell(8).value = freqTargetStr;
+            row.getCell(9).value = dueDateStr;
+            row.getCell(10).value = target;
+            row.getCell(11).value = selesai;
+            // Kolom 12: Persentase saja
+            row.getCell(12).value = `${pctVal}%`;
+
+            row.font = { name: "Calibri", size: 9.5 };
+            row.height = 20;
+
+            const isEven = index % 2 === 1;
+            const bgArgb = isEven ? "F8FAFC" : "FFFFFF";
+
+            row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                cell.fill = {
+                    type: "pattern",
+                    pattern: "solid",
+                    fgColor: { argb: bgArgb },
+                };
+
+                cell.border = {
+                    top: { style: "thin", color: { argb: "E2E8F0" } },
+                    bottom: { style: "thin", color: { argb: "E2E8F0" } },
+                    left: { style: "thin", color: { argb: "E2E8F0" } },
+                    right: { style: "thin", color: { argb: "E2E8F0" } },
+                };
+
+                // Alignment
+                if ([1, 4, 5, 7, 8, 9, 10, 11, 12].includes(colNumber)) {
+                    cell.alignment = {
+                        vertical: "middle",
+                        horizontal: "center",
+                    };
+                } else {
+                    cell.alignment = { vertical: "middle", horizontal: "left" };
+                }
+
+                // Pewarnaan persentase saja (kolom 12)
+                if (colNumber === 12) {
+                    if (pctVal >= 100) {
+                        cell.font = {
+                            name: "Calibri",
+                            size: 9.5,
+                            bold: true,
+                            color: { argb: "16A34A" },
+                        }; // Hijau
+                    } else if (pctVal > 0) {
+                        cell.font = {
+                            name: "Calibri",
+                            size: 9.5,
+                            bold: true,
+                            color: { argb: "2563EB" },
+                        }; // Biru
+                    } else {
+                        cell.font = {
+                            name: "Calibri",
+                            size: 9.5,
+                            color: { argb: "64748B" },
+                        }; // Abu
+                    }
+                }
+            });
+        });
+
+        // Auto-fit column widths
+        sheet.columns.forEach((column) => {
+            let maxLength = 0;
+            column.eachCell({ includeEmpty: true }, (cell) => {
+                const valStr = cell.value ? String(cell.value) : "";
+                if (valStr.length > maxLength) {
+                    maxLength = valStr.length;
+                }
+            });
+            column.width = Math.max(maxLength + 4, 13);
+        });
+
+        const safeDivisiFile = divisiLabel.replace(/[^a-zA-Z0-9]/g, "_");
+        const filename = `Laporan_Jadwal_${safeDivisiFile}_${monthLabel}_${yearLabel}.xlsx`;
+
+        // Dukungan respons JSON Base64 untuk mencegah pencegatan (intercept 204) oleh IDM pada request AJAX / Fetch
+        if (
+            req.query.base64 === "true" ||
+            String(req.headers["accept"] || "").includes("application/json")
+        ) {
+            const buffer = await workbook.xlsx.writeBuffer();
+            const base64Data = Buffer.from(buffer).toString("base64");
+            return response.ok(res, {
+                filename,
+                base64: base64Data,
+            });
+        }
+
+        res.setHeader(
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        );
+        res.setHeader(
+            "Content-Disposition",
+            `attachment; filename="${filename}"`,
+        );
+
+        await workbook.xlsx.write(res);
+        res.end();
+    } catch (err) {
+        next(err);
+    }
+};
+
 module.exports = {
     getAll,
     getByDivisi,
@@ -1929,4 +2404,5 @@ module.exports = {
     updateStatus,
     renew,
     hariIni,
+    exportExcel,
 };

@@ -1619,6 +1619,18 @@ const exportExcel = async (req, res, next) => {
         const safeDivisiFile = divisiLabel.replace(/[^a-zA-Z0-9]/g, "_");
         const filename = `Laporan_Maintenance_${safeDivisiFile}_${monthLabel}_${yearLabel}.xlsx`;
 
+        if (
+            req.query.base64 === "true" ||
+            String(req.headers["accept"] || "").includes("application/json")
+        ) {
+            const buffer = await workbook.xlsx.writeBuffer();
+            const base64Data = Buffer.from(buffer).toString("base64");
+            return response.ok(res, {
+                filename,
+                base64: base64Data,
+            });
+        }
+
         res.setHeader(
             "Content-Type",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

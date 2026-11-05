@@ -216,10 +216,20 @@ exports.createVoucher = async (req, res, next) => {
         }
 
         // Tentukan pemohon
+        let pemohonNama = req.user.user_nama;
         const pemohonId =
             isManagerOrAdmin && user_id_target
                 ? parseInt(user_id_target, 10)
                 : req.user.user_id;
+
+        if (pemohonId !== req.user.user_id) {
+            const targetUser = await plan_user.findByPk(pemohonId, {
+                attributes: ["user_id", "user_nama"],
+            });
+            if (targetUser) {
+                pemohonNama = targetUser.user_nama;
+            }
+        }
 
         // Validasi apakah inventaris eligible untuk pemohon hari ini
         const today = new Date().toISOString().slice(0, 10);
@@ -271,6 +281,7 @@ exports.createVoucher = async (req, res, next) => {
         const newVoucher = await plan_voucher.create({
             voucher_no_bon: null,
             voucher_user_id: pemohonId,
+            voucher_user_nama: pemohonNama,
             voucher_inv_id: invId,
             voucher_spbu_id: spbuId,
             voucher_jenis_bbm,

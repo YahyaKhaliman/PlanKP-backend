@@ -23,6 +23,11 @@ module.exports = function (sequelize, DataTypes) {
                     key: "user_id",
                 },
             },
+            voucher_user_nama: {
+                type: DataTypes.STRING(150),
+                allowNull: true,
+                comment: "Snapshot nama pengguna pemohon voucher",
+            },
             voucher_inv_id: {
                 type: DataTypes.INTEGER,
                 allowNull: false,

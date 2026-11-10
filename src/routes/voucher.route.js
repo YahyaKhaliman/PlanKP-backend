@@ -13,6 +13,11 @@ router.get("/voucher/eligible-inventaris", voucher.getEligibleInventaris);
 router.get("/voucher", voucher.getVouchers);
 router.get("/voucher/:id", voucher.getVoucherDetail);
 router.post("/voucher", voucher.createVoucher);
+router.put(
+    "/voucher/:id",
+    allowOnly("admin", "manager"),
+    voucher.updateVoucher,
+);
 
 // Approval Admin / Manager
 router.put(

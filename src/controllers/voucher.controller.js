@@ -8,6 +8,7 @@ const {
     plan_realisasi,
 } = require("../models");
 const response = require("../utils/response");
+const { normalizeDivisi } = require("../utils/divisi");
 
 const BBM_TYPES = ["Pertalite", "Pertamax", "Solar", "Dexlite"];
 
@@ -543,6 +544,234 @@ exports.rejectVoucher = async (req, res, next) => {
         });
 
         return response.ok(res, voucher, "Voucher telah ditolak");
+    } catch (err) {
+        next(err);
+    }
+};
+
+/**
+ * Edit / Update data voucher BBM oleh Admin Divisi
+ * Hanya voucher berstatus "Menunggu" yang dapat diedit.
+ * Admin divisi hanya dapat mengedit voucher dalam lingkup divisinya.
+ */
+exports.updateVoucher = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const voucher = await plan_voucher.findByPk(id, {
+            include: [
+                {
+                    model: plan_user,
+                    as: "pemohon",
+                    attributes: ["user_id", "user_nama", "user_divisi"],
+                },
+            ],
+        });
+
+        if (!voucher) {
+            return response.error(res, "Voucher tidak ditemukan", 404);
+        }
+
+        // Hanya voucher berstatus 'Menunggu' atau 'Disetujui' yang boleh diedit
+        if (!["Menunggu", "Disetujui"].includes(voucher.voucher_status)) {
+            return response.error(
+                res,
+                `Voucher dengan status '${voucher.voucher_status}' tidak dapat diedit`,
+                400,
+            );
+        }
+
+        // Cek scope divisi untuk admin
+        const isAdmin = req.user.user_jabatan === "admin";
+        if (isAdmin && req.adminScope) {
+            const pemohonDivisi =
+                normalizeDivisi(voucher.pemohon?.user_divisi) ||
+                voucher.pemohon?.user_divisi;
+            if (pemohonDivisi !== req.adminScope) {
+                return response.error(
+                    res,
+                    "Akses ditolak: voucher ini di luar divisi Anda",
+                    403,
+                );
+            }
+        }
+
+        const {
+            voucher_inv_id,
+            voucher_spbu_id,
+            voucher_jenis_bbm,
+            voucher_jumlah_liter,
+            voucher_odometer,
+            voucher_no_bon,
+            user_id_target,
+        } = req.body;
+
+        const updateData = {};
+
+        // 1. Jika mengubah driver pemohon (user_id_target)
+        if (user_id_target !== undefined && user_id_target !== null) {
+            const targetId = parseInt(user_id_target, 10);
+            if (isNaN(targetId)) {
+                return response.error(res, "ID target pemohon tidak valid", 400);
+            }
+            const targetUser = await plan_user.findByPk(targetId);
+            if (!targetUser || !targetUser.user_is_active) {
+                return response.error(
+                    res,
+                    "Target user tidak ditemukan atau tidak aktif",
+                    400,
+                );
+            }
+            if (isAdmin && req.adminScope) {
+                const targetDivisi =
+                    normalizeDivisi(targetUser.user_divisi) ||
+                    targetUser.user_divisi;
+                if (targetDivisi !== req.adminScope) {
+                    return response.error(
+                        res,
+                        "Akses ditolak: user target di luar divisi Anda",
+                        403,
+                    );
+                }
+            }
+            updateData.voucher_user_id = targetUser.user_id;
+            updateData.voucher_user_nama = targetUser.user_nama;
+        }
+
+        // 2. Jika mengubah SPBU
+        if (voucher_spbu_id !== undefined && voucher_spbu_id !== null) {
+            const spbuId = parseInt(voucher_spbu_id, 10);
+            if (isNaN(spbuId)) {
+                return response.error(res, "ID SPBU harus berupa angka", 400);
+            }
+            const spbu = await plan_spbu.findByPk(spbuId);
+            if (!spbu || !spbu.spbu_is_active) {
+                return response.error(
+                    res,
+                    "SPBU tidak ditemukan atau tidak aktif",
+                    400,
+                );
+            }
+            updateData.voucher_spbu_id = spbuId;
+        }
+
+        // 3. Jika mengubah Kendaraan (Inventaris)
+        if (voucher_inv_id !== undefined && voucher_inv_id !== null) {
+            const invId = parseInt(voucher_inv_id, 10);
+            if (isNaN(invId)) {
+                return response.error(res, "ID Inventaris harus berupa angka", 400);
+            }
+            const inv = await plan_inventaris.findByPk(invId);
+            if (!inv || !inv.inv_is_active) {
+                return response.error(
+                    res,
+                    "Inventaris tidak ditemukan atau tidak aktif",
+                    400,
+                );
+            }
+            updateData.voucher_inv_id = invId;
+        }
+
+        // 4. Jika mengubah Jenis BBM
+        if (voucher_jenis_bbm !== undefined && voucher_jenis_bbm !== null) {
+            if (!BBM_TYPES.includes(voucher_jenis_bbm)) {
+                return response.error(
+                    res,
+                    `Jenis BBM tidak valid. Pilihan: ${BBM_TYPES.join(", ")}`,
+                    400,
+                );
+            }
+            updateData.voucher_jenis_bbm = voucher_jenis_bbm;
+        }
+
+        // 5. Jika mengubah Jumlah Liter
+        if (voucher_jumlah_liter !== undefined && voucher_jumlah_liter !== null) {
+            const liter = parseFloat(voucher_jumlah_liter);
+            if (isNaN(liter) || liter <= 0) {
+                return response.error(
+                    res,
+                    "Jumlah liter harus berupa angka lebih dari 0",
+                    400,
+                );
+            }
+            if (liter > 100) {
+                return response.error(
+                    res,
+                    "Jumlah liter maksimal 100 liter",
+                    400,
+                );
+            }
+            updateData.voucher_jumlah_liter = liter;
+        }
+
+        // 6. Jika mengubah Odometer
+        if (voucher_odometer !== undefined) {
+            if (voucher_odometer === null || String(voucher_odometer).trim() === "") {
+                updateData.voucher_odometer = null;
+            } else {
+                const odo = parseInt(voucher_odometer, 10);
+                if (isNaN(odo) || odo < 0) {
+                    return response.error(
+                        res,
+                        "Nilai odometer harus berupa angka bulat positif",
+                        400,
+                    );
+                }
+                updateData.voucher_odometer = odo;
+            }
+        }
+
+        // 7. Jika mengubah Nomor Bon Fisik (terutama revisi voucher Disetujui)
+        if (voucher_no_bon !== undefined) {
+            updateData.voucher_no_bon =
+                voucher_no_bon === null || String(voucher_no_bon).trim() === ""
+                    ? null
+                    : String(voucher_no_bon).trim();
+        }
+
+        if (Object.keys(updateData).length === 0) {
+            return response.error(res, "Tidak ada data yang diubah", 400);
+        }
+
+        updateData.voucher_updated_at = new Date();
+        await voucher.update(updateData);
+
+        // Ambil data voucher terbaru lengkap dengan relasi
+        const updatedVoucher = await plan_voucher.findByPk(id, {
+            include: [
+                {
+                    model: plan_user,
+                    as: "pemohon",
+                    attributes: ["user_id", "user_nama", "user_nik", "user_divisi"],
+                },
+                {
+                    model: plan_inventaris,
+                    as: "inventaris",
+                    attributes: [
+                        "inv_id",
+                        "inv_no",
+                        "inv_nama",
+                        "inv_merk",
+                        "inv_serial_number",
+                    ],
+                },
+                {
+                    model: plan_spbu,
+                    as: "spbu",
+                    attributes: ["spbu_id", "spbu_nama", "spbu_alamat"],
+                },
+                {
+                    model: plan_user,
+                    as: "approver",
+                    attributes: ["user_id", "user_nama", "user_jabatan"],
+                },
+            ],
+        });
+
+        return response.ok(
+            res,
+            updatedVoucher,
+            "Data voucher berhasil diperbarui",
+        );
     } catch (err) {
         next(err);
     }
